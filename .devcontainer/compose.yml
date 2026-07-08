@@ -1,9 +1,30 @@
-# Local dev container: a Python workspace plus the same Postgres from the root
-# compose (pulled in via include, so the db service is defined in one place only).
-include:
-  - ../docker-compose.yml
-
+# Local dev container: a Python workspace plus its own Postgres.
+#
+# This is standalone on purpose. It does NOT include ../docker-compose.yml, because
+# Compose *appends* port mappings across included files rather than replacing them,
+# so including the root compose would drag its `5432:5432` host publish in here and
+# collide with a host-run `make up`. The dev container reaches Postgres over the
+# internal compose network at db:5432, so it never needs to publish 5432 on the host.
+# Result: you can run the host stack and the dev container at the same time.
+#
+# This db is a separate volume from the host one, so it starts empty. Seed it once
+# from a dev-container terminal with `make db-init` (the db is already running as a
+# sibling here, so use db-init, not the host-only `make setup`).
 services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: lab
+      POSTGRES_PASSWORD: lab
+      POSTGRES_DB: sysdesign
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lab -d sysdesign"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
   workspace:
     image: mcr.microsoft.com/devcontainers/python:3.13
     volumes:
@@ -14,3 +35,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+volumes:
+  pgdata:
