@@ -1,0 +1,16 @@
+# Local dev container: a Python workspace plus the same Postgres from the root
+# compose (pulled in via include, so the db service is defined in one place only).
+include:
+  - ../docker-compose.yml
+
+services:
+  workspace:
+    image: mcr.microsoft.com/devcontainers/python:3.13
+    volumes:
+      - ..:/workspace:cached
+    command: sleep infinity
+    environment:
+      DATABASE_URL: postgresql://lab:lab@db:5432/sysdesign
+    depends_on:
+      db:
+        condition: service_healthy

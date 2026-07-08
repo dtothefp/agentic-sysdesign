@@ -1,0 +1,23 @@
+{
+  "name": "sysdesign-m1-data-model",
+  "dockerComposeFile": "compose.yml",
+  "service": "workspace",
+  "workspaceFolder": "/workspace",
+  "forwardPorts": [5432],
+  "portsAttributes": {
+    "5432": { "label": "Postgres", "onAutoForward": "silent" }
+  },
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y postgresql-client && curl -LsSf https://astral.sh/uv/install.sh | sh -s -- -y && $HOME/.local/bin/uv sync",
+  "postStartCommand": "echo 'Dev container ready. DATABASE_URL points at db:5432. Try: make schema partitions seed drills'",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  }
+}
