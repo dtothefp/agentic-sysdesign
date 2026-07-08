@@ -39,16 +39,35 @@ psql "postgresql://lab:lab@localhost:5432/sysdesign"
 
 ## Dev environments
 
-Two layers, complementary, both pointing at the same `docker-compose.yml`:
+Two layers, complementary:
 
 - `.devcontainer/`. Local reproducible container (VS Code or Cursor "Reopen in
-  Container"). A Python workspace plus the Postgres service; `DATABASE_URL` inside the
-  container points at `db:5432`.
+  Container"). It's self-contained: a Python workspace plus its own Postgres, defined in
+  `.devcontainer/compose.yml`. The workspace reaches the db over the internal network at
+  `db:5432`, so the container's Postgres does NOT publish a host port. That's deliberate.
+  It means the dev container never collides with a host-run `make up` on 5432, and you
+  can run both at once. The tradeoff is the container's db is a separate volume, so it
+  starts empty. Seed it once from a container terminal:
+
+  ```bash
+  make db-init   # schema + partitions + seed, no `docker compose up` (db is already a sibling here)
+  make drills
+  ```
+
+  Use `db-init` inside the container, not `make setup`. `setup` tries to `docker compose
+  up` a db, which is the host workflow; inside the container the db is already running.
 - `.cursor/environment.json`. The config Cursor Cloud Agents read to boot their own
   environment. Installs `uv` and the Postgres client, syncs deps, and brings up the db.
   Cloud agents run in a Docker container on a VM. If docker-in-docker is not available
   in the agent environment, swap the `start` step for a Dockerfile-provisioned Postgres
   or an external database URL passed as a scoped secret.
+
+### If the dev container fails with "port is already allocated"
+
+That means something on the host already holds `5432` (usually a `make setup` / `make up`
+you ran earlier). The current dev container no longer publishes 5432, so a fresh
+"Rebuild Container" resolves it. If you're on an older checkout that still published the
+port, either stop the host stack first (`make down`) or pull this fix.
 
 ## Git workflow
 

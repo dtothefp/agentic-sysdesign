@@ -20,7 +20,8 @@ work, so a frontend would be idle. The frontend arrives in the Module 2 repo whe
 ## Build / Dev
 
 ```bash
-make setup       # docker compose up db, apply schema + partitions, seed, refresh matview
+make setup       # HOST: docker compose up db, apply schema + partitions, seed, refresh matview
+make db-init     # DEV CONTAINER: schema + partitions + seed, no `docker compose up` (db is a sibling)
 make drills      # run drills/explain-drills.sql
 make down        # drop the volume
 make reset       # down then setup
@@ -29,6 +30,12 @@ uv run python -m common.seed   # re-seed (idempotent, inserts nothing the second
 
 `DATABASE_URL` defaults to `postgresql://lab:lab@localhost:5432/sysdesign` on the host,
 and `db:5432` inside the dev container.
+
+The dev container (`.devcontainer/compose.yml`) is standalone and runs its own Postgres
+with no host port publish, so it never collides with a host-run `make up` on 5432. Its db
+is a separate volume, so seed it once with `make db-init` from a container terminal. Do
+not add `include: ../docker-compose.yml` back. Compose appends port mappings, which
+reintroduces the 5432 collision.
 
 ## Git workflow
 
