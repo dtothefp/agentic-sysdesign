@@ -3,7 +3,7 @@
   "dockerComposeFile": "compose.yml",
   "service": "workspace",
   "workspaceFolder": "/workspace",
-  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y postgresql-client && curl -LsSf https://astral.sh/uv/install.sh | sh -s -- -y && $HOME/.local/bin/uv sync",
+  "postCreateCommand": "uv sync",
   "postStartCommand": "echo 'Dev container ready. Postgres is a sibling at db:5432 (no host port). First time: run make db-init, then make drills.'",
   "customizations": {
     "vscode": {
