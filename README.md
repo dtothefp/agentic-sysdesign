@@ -10,13 +10,14 @@ it you have not already touched with your hands.
 
 ## What it builds
 
-- `common/schema.sql`. The locked schema every later module reuses. `raw_signals` is
-  RANGE partitioned by `captured_at`, the partition key lives inside every unique
-  constraint, and there is a durable `runs` job-of-record table (Module 2 writes to
-  it on state transitions while pushing high-frequency progress to a Redis cache).
-- `common/partitions.sql`. Monthly child partitions plus an idempotent
-  `create_month_partition(date)` maintenance function (the production answer is
-  `pg_partman`).
+- `db/migrations/*.sql`. The schema, applied as versioned migrations via
+  [dbmate](https://github.com/amacneil/dbmate). `20260708000001_initial_schema.sql`
+  creates the tables (`raw_signals` RANGE partitioned by `captured_at`, the partition key
+  inside every unique constraint, and a durable `runs` job-of-record table that Module 2
+  writes to on state transitions while pushing high-frequency progress to a Redis cache).
+  `20260708000002_monthly_partitions.sql` adds the monthly child partitions and an
+  idempotent `create_month_partition(date)` maintenance function (the production answer is
+  `pg_partman`). These files are the single source of truth for the shape.
 - `common/seed.py`. Loads 5 competitors and ~4000 signals across three months so
   partition pruning has something to prune. Idempotent on the locked unique key, so
   re-running inserts nothing.
@@ -24,12 +25,26 @@ it you have not already touched with your hands.
   pruning, index vs seq scan, the no-partition-key anti-pattern, covering index-only
   scans, the matview read/write split, and concurrent refresh.
 
-## Quick start (local)
+## Migrations (dbmate)
 
-Needs Docker, `uv`, and a `psql` client on the host.
+A migration is just an ordered SQL file with a `migrate:up` block (apply) and a
+`migrate:down` block (undo). dbmate records which files have run in a `schema_migrations`
+table, so it never runs one twice. That's the whole idea, no ORM and no codegen.
 
 ```bash
-make setup     # up + schema + partitions + seed, one shot
+make migrate    # apply every pending migration in order
+make status     # show which have run, which are pending
+make rollback   # undo the most recent migration (its migrate:down)
+make new name=add_events_index   # scaffold the next timestamped migration
+```
+
+## Quick start (local)
+
+Needs Docker, `uv`, `psql`, and `dbmate` on the host (`brew install dbmate`). The dev
+container has all four preinstalled, so in Cursor you skip straight to `make db-init`.
+
+```bash
+make setup     # up + migrate + seed, one shot
 make drills    # run the six EXPLAIN drills
 # or open a shell:
 psql "postgresql://lab:lab@localhost:5432/sysdesign"
