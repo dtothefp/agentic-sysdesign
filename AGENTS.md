@@ -54,10 +54,26 @@ make status      # which migrations have run vs pending
 make rollback    # undo the most recent migration (its migrate:down)
 make new name=X  # scaffold the next timestamped migration
 make drills      # run drills/explain-drills.sql (whole file, smoke test)
+make api         # run the FastAPI surface (uvicorn, reload) at :8000, docs at /docs
+make openapi     # export the OpenAPI spec to backend/openapi.json (no db/server needed)
 make down        # drop the volume
 make reset       # down then setup
 uv run python -m common.seed   # re-seed (idempotent, inserts nothing the second time)
 ```
+
+The FastAPI app lives in `backend/api/` (`api.main:app`). Endpoints: `/competitors`,
+`/sources`, `/signals` (POST is the idempotent `ON CONFLICT` upsert, content_hash derived
+server-side; GET requires a `from`/`to` window so it always prunes), and `/rollup` (reads
+the matview). To populate real data, use the in-repo `scrape-signals` skill
+(`.claude/skills/scrape-signals/`), which POSTs public data through the API.
+
+FastAPI generates the OpenAPI spec automatically (`/openapi.json`, Swagger at `/docs`,
+ReDoc at `/redoc`); no separate OpenAPI library. `operationId`s are the handler names so
+generated clients read cleanly. `make openapi` dumps the spec to `backend/openapi.json`
+(introspection only, no db/server), which the Module 2 Next.js frontend codegens a typed
+client from. Keep raw SQL via psycopg, no ORM. The explicit SQL is the studyable artifact
+(partition pruning, ON CONFLICT, index usage stay visible), and it matches the dbmate
+raw-SQL migration choice.
 
 To study a single query plan, don't use `make drills` (it fires the whole file at once).
 Open an interactive shell with `psql "$DATABASE_URL"` and paste one drill block at a time.

@@ -6,7 +6,7 @@ export DATABASE_URL
 # truth, so there's no generated schema file to keep in sync.
 DBMATE = dbmate --no-dump-schema --migrations-dir db/migrations --url "$(DATABASE_URL)?sslmode=disable"
 
-.PHONY: up migrate rollback status new seed db-init drills setup down reset
+.PHONY: up migrate rollback status new seed db-init drills setup down reset api openapi
 
 up:
 	docker compose up -d db
@@ -43,6 +43,16 @@ db-init: migrate seed
 
 drills:
 	psql "$(DATABASE_URL)" -f drills/explain-drills.sql
+
+# run the FastAPI surface with reload. docs at http://localhost:8000/docs
+api:
+	uv run uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+
+# export the OpenAPI spec to a file the Module 2 frontend codegens a typed client from.
+# app.openapi() only introspects the routes, so this needs no running db or server.
+openapi:
+	uv run python -c "import json; from api.main import app; print(json.dumps(app.openapi(), indent=2))" > openapi.json
+	@echo "wrote backend/openapi.json"
 
 # host one-shot: bring the db up (publishes 5432) then migrate + seed.
 setup: up db-init

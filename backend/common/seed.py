@@ -5,7 +5,6 @@ SQL is the idempotency contract and the answer to most "what if it runs twice" p
 
 Run:  uv run python -m common.seed
 """
-import hashlib
 import json
 import random
 from datetime import datetime, timedelta, timezone
@@ -13,14 +12,11 @@ from datetime import datetime, timedelta, timezone
 import psycopg
 
 from common.db import DATABASE_URL
+from common.hashing import content_hash
 
 COMPETITORS = ["Alpha", "Bravo", "Charlie", "Delta", "Echo"]
 # deterministic so re-seeding produces the same content_hash set (true idempotency)
 random.seed(42)
-
-
-def content_hash(payload: dict) -> str:
-    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 def main() -> None:

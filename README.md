@@ -68,6 +68,36 @@ adds the monthly child partitions and an idempotent `create_month_partition(date
 maintenance function (the production answer is `pg_partman`). These files are the single
 source of truth for the schema shape.
 
+## API
+
+A thin FastAPI surface over the schema lives in `backend/api/`. Run it from `backend/`:
+
+```bash
+make api    # uvicorn at http://localhost:8000, interactive docs at /docs
+```
+
+Endpoints: `/competitors`, `/sources`, `/signals`, `/rollup`. Two things it's built to show.
+`POST /signals` is the idempotent `ON CONFLICT DO NOTHING` upsert with `content_hash` derived
+server-side, so re-POSTing the identical signal is a no-op. `GET /signals` requires a
+`from`/`to` window, so every read carries the partition key and prunes to the relevant
+month(s) instead of fanning across all partitions.
+
+To fill the database with real (not synthetic) data, use the in-repo `scrape-signals` skill
+(`.claude/skills/scrape-signals/`). It scrapes public sources (Hacker News to start) and
+POSTs them through the API, so the data takes the same idempotent path the app uses.
+
+### OpenAPI
+
+FastAPI generates the OpenAPI spec automatically from the Pydantic models and route
+signatures. No extra library. While `make api` is running, the spec is machine-readable at
+`/openapi.json`, with Swagger UI at `/docs` and ReDoc at `/redoc`. `operationId`s are the
+handler names (`listSignals`, `createSignal`) so a generated client reads cleanly.
+
+`make openapi` writes the spec to `backend/openapi.json` without a running db or server (it
+only introspects the routes). That file is the codegen input for the Module 2 Next.js
+frontend, which points a typed-client generator (openapi-typescript / orval) at it to get a
+fully typed API client. Regenerate it whenever the API surface changes.
+
 ## Drills
 
 `backend/drills/explain-drills.sql` has six `EXPLAIN (ANALYZE, BUFFERS)` drills covering
