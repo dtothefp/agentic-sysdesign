@@ -1,10 +1,10 @@
 {
-  "name": "sysdesign-m1-data-model",
+  "name": "sysdesign",
   "dockerComposeFile": "compose.yml",
   "service": "workspace",
   "workspaceFolder": "/workspace",
-  "postCreateCommand": "uv sync",
-  "postStartCommand": "echo 'Dev container ready. Postgres is a sibling at db:5432 (no host port). First time: run make db-init, then make drills.'",
+  "postCreateCommand": "cd backend && uv sync",
+  "postStartCommand": "echo 'Dev container ready. Postgres is a sibling at db:5432 (no host port). First time: cd backend, then run make db-init, then make drills.'",
   "customizations": {
     "vscode": {
       "extensions": [

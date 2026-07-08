@@ -49,7 +49,7 @@ wheels = [
 ]
 
 [[package]]
-name = "sysdesign-m1-data-model"
+name = "sysdesign-backend"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

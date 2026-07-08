@@ -1,0 +1,11 @@
+[project]
+name = "sysdesign-backend"
+version = "0.1.0"
+description = "Backend for the system-design build guide (competitor-intelligence pipeline). Module 1: partitioned Postgres schema, per-partition indexes, a read-path materialized view, and EXPLAIN drills. Later modules add the FastAPI surface, Celery fan-out, and more."
+requires-python = ">=3.13"
+dependencies = [
+  "psycopg[binary]>=3.2",
+]
+
+[tool.uv]
+package = false
