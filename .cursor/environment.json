@@ -1,0 +1,10 @@
+{
+  "install": "sudo apt-get update && sudo apt-get install -y postgresql-client && curl -LsSf https://astral.sh/uv/install.sh | sh -s -- -y && $HOME/.local/bin/uv sync",
+  "start": "docker compose up -d db",
+  "terminals": [
+    {
+      "name": "psql",
+      "command": "bash -lc 'sleep 5 && psql \"${DATABASE_URL:-postgresql://lab:lab@localhost:5432/sysdesign}\"'"
+    }
+  ]
+}
