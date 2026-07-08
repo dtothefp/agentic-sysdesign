@@ -1,9 +1,10 @@
--- Module 1 locked schema. Every later module (Celery, AWS, pgvector, LLM, graph)
--- reuses this file verbatim, so it is the single source of truth for the shape.
--- The load-bearing bits: raw_signals is RANGE partitioned by captured_at, and the
--- partition key lives inside every unique constraint (Postgres enforces uniqueness
--- per partition, so the partition column has to be in the key).
+-- Initial schema. Every later module (Celery, AWS, pgvector, LLM, graph) reuses this,
+-- so it is the single source of truth for the shape. The load-bearing bits: raw_signals
+-- is RANGE partitioned by captured_at, and the partition key lives inside every unique
+-- constraint (Postgres enforces uniqueness per partition, so the partition column has to
+-- be in the key).
 
+-- migrate:up
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE competitors (
@@ -84,3 +85,14 @@ SELECT competitor_id,
 FROM raw_signals
 GROUP BY competitor_id, date_trunc('day', captured_at);
 CREATE UNIQUE INDEX ON daily_signal_rollup (competitor_id, day);
+
+-- migrate:down
+DROP MATERIALIZED VIEW IF EXISTS daily_signal_rollup;
+DROP TABLE IF EXISTS runs;
+DROP TABLE IF EXISTS digests;
+DROP TABLE IF EXISTS embeddings;
+DROP TABLE IF EXISTS events;
+DROP TABLE IF EXISTS raw_signals;
+DROP TABLE IF EXISTS sources;
+DROP TABLE IF EXISTS competitors;
+DROP EXTENSION IF EXISTS vector;
