@@ -73,7 +73,8 @@ generated clients read cleanly. `make openapi` dumps the spec to `backend/openap
 (introspection only, no db/server), which the Module 2 Next.js frontend codegens a typed
 client from. Keep raw SQL via psycopg, no ORM. The explicit SQL is the studyable artifact
 (partition pruning, ON CONFLICT, index usage stay visible), and it matches the dbmate
-raw-SQL migration choice.
+raw-SQL migration choice. A later tag revisits the data-access layer with SQLAlchemy as a
+deliberate before/after (same endpoints, ORM instead of raw SQL); Module 1 stays raw SQL.
 
 To study a single query plan, don't use `make drills` (it fires the whole file at once).
 Open an interactive shell with `psql "$DATABASE_URL"` and paste one drill block at a time.
