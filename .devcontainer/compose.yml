@@ -26,12 +26,17 @@ services:
       retries: 10
 
   workspace:
-    image: mcr.microsoft.com/devcontainers/python:3.13
+    build:
+      context: .
+      dockerfile: Dockerfile
     volumes:
       - ..:/workspace:cached
     command: sleep infinity
     environment:
       DATABASE_URL: postgresql://lab:lab@db:5432/sysdesign
+      # keep uv's venv OUTSIDE the bind mount. the host's /workspace/.venv is a macOS
+      # venv and would shadow a Linux one if uv used the default ./.venv location.
+      UV_PROJECT_ENVIRONMENT: /home/vscode/.venv
     depends_on:
       db:
         condition: service_healthy
