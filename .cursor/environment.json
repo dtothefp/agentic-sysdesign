@@ -1,6 +1,6 @@
 {
-  "install": "sudo apt-get update && sudo apt-get install -y postgresql-client && curl -LsSf https://astral.sh/uv/install.sh | sh -s -- -y && $HOME/.local/bin/uv sync",
-  "start": "docker compose up -d db",
+  "install": "sudo apt-get update && sudo apt-get install -y postgresql-client && curl -LsSf https://astral.sh/uv/install.sh | sh -s -- -y && (cd backend && $HOME/.local/bin/uv sync)",
+  "start": "cd backend && docker compose up -d db",
   "terminals": [
     {
       "name": "psql",
