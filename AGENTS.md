@@ -12,13 +12,19 @@ in one repo that accumulates. Each finished module gets a git tag (`module-1`,
 
 - **Module 1, data model.** Partitioned Postgres schema, per-partition indexes, a
   read-path materialized view, EXPLAIN drills, and the FastAPI surface over it.
-- **Module 2, Celery fan-out.** Background scraping jobs writing to the `runs` table on
-  state transitions, live progress in Redis, and a Next.js frontend polling it. The fan-in
-  step (after all parallel scrape jobs land their signals) runs `REFRESH MATERIALIZED VIEW
-  CONCURRENTLY daily_signal_rollup`, so the rollup reflects each run the moment it finishes,
-  with a periodic cron (`pg_cron` or a Celery beat task) as a backstop for staleness. This
-  is why Module 1 built the matview with a unique index on `(influencer_id, day)`, the
-  index is what lets `CONCURRENTLY` refresh without locking dashboard readers.
+- **Module 2, Celery fan-out.** `POST /runs` fans out one Celery task per influencer (a
+  chord), each writing signals through the same `common.signals.insert_signal` upsert the API
+  uses, bumping the `runs` row's `done_count`, and publishing a progress delta to a Redis
+  channel. The frontend streams progress over **Server-Sent Events** (`GET /runs/{id}/stream`,
+  `sse-starlette`), not polling: the endpoint reads the `runs` snapshot from Postgres on
+  connect (so a page refresh re-establishes state) then subscribes to Redis for live deltas.
+  The chord's fan-in callback runs `REFRESH MATERIALIZED VIEW CONCURRENTLY daily_signal_rollup`
+  so the rollup reflects each run the moment it finishes, with a Celery-beat task (every 5 min)
+  as a staleness backstop. This is why Module 1 built the matview with a unique index on
+  `(influencer_id, day)`, that index is what lets `CONCURRENTLY` refresh without locking
+  dashboard readers. Runs have a `demo` mode (synthetic signals, no Apify spend) for watching
+  the fan-out and SSE stream cheaply, and a `live` mode (real Apify scrape). Backend lives in
+  `backend/worker/` (`celery_app.py`, `tasks.py`, `scrape.py`); run it with `make worker`.
 - **Module 3, AWS-native.** Deploy for real (routed through the app-setup agent, which
   owns the deploy wiring).
 - **Module 4, pgvector.** Semantic search over signals (the `embeddings` table is already
@@ -64,6 +70,8 @@ make seed        # full seed: watchlist + 4000 synthetic signals (drill volume)
 make seed-influencers  # just the watchlist, no signals
 make drills      # run drills/explain-drills.sql (whole file, smoke test)
 make api         # run the FastAPI surface (uvicorn, reload) at :8000, docs at /docs
+make worker      # DEV CONTAINER: Celery worker for Module 2 fan-out jobs (needs Redis + the API)
+make worker-beat # DEV CONTAINER: Celery beat, periodic rollup-refresh backstop (optional, alongside worker)
 make openapi     # export the OpenAPI spec to backend/openapi.json (no db/server needed)
 make down        # drop the volume
 make reset       # down then setup

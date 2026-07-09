@@ -8,6 +8,10 @@ dependencies = [
   "psycopg-pool>=3.2",
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
+  # Module 2: background fan-out + live progress.
+  "celery>=5.4",          # task queue: fan-out (group) + fan-in (chord), Redis broker
+  "redis>=5.0",           # broker/result-backend client + the pub/sub bus for progress
+  "sse-starlette>=2.1",   # EventSourceResponse: FastAPI-native SSE (disconnect + keep-alive)
 ]
 
 [tool.uv]

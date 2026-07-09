@@ -6,7 +6,7 @@ export DATABASE_URL
 # truth, so there's no generated schema file to keep in sync.
 DBMATE = dbmate --no-dump-schema --migrations-dir db/migrations --url "$(DATABASE_URL)?sslmode=disable"
 
-.PHONY: up migrate rollback status new seed seed-influencers db-init db-fresh db-empty drills setup down reset api openapi
+.PHONY: up migrate rollback status new seed seed-influencers db-init db-fresh db-empty drills setup down reset api openapi worker worker-beat
 
 up:
 	docker compose up -d db
@@ -70,6 +70,18 @@ drills:
 # run the FastAPI surface with reload. docs at http://localhost:8000/docs
 api:
 	uv run uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+
+# Module 2: the Celery worker that runs fan-out scrape jobs. Needs Redis (the dev container
+# provides it) and DATABASE_URL. Run this in its own dev-container terminal alongside `make api`,
+# then POST /runs to fan out. --concurrency 4 lets four influencers scrape in parallel.
+worker:
+	uv run celery -A worker.celery_app worker --loglevel INFO --concurrency 4
+
+# Optional periodic backstop that re-refreshes the rollup every 5 min (celery beat is a
+# separate singleton process). The fan-in already refreshes after each run, so this is belt-
+# and-suspenders. Run alongside `make worker`.
+worker-beat:
+	uv run celery -A worker.celery_app beat --loglevel INFO
 
 # export the OpenAPI spec to a file the Module 2 frontend codegens a typed client from.
 # app.openapi() only introspects the routes, so this needs no running db or server.
