@@ -107,7 +107,8 @@ create_run() calls start_run()          [worker/tasks.py]
    └── chord( [5 task signatures] )( finalize_run )
           │
           └── 5 messages pushed onto the broker  ──▶  REDIS /0
-              + chord registered in the result backend  ──▶  REDIS /1
+              (each message carries the chord metadata: which callback
+               to fire and how many siblings to wait for)
 
    ◀── returns {"run_id": 3, "total": 5, "mode": "demo"}   (HTTP done)
 ```
@@ -159,9 +160,94 @@ finalize_run(results=[{...},{...},{...},{...},{...}], run_id=3)
 The refresh runs here, once per run, instead of inside each task (which would run it 5
 times) or on every dashboard read (which would defeat the point of a matview).
 
+## How the worker gets the message (there is no trigger)
+
+The API never starts, calls, or reaches into the worker. Both processes were started
+independently (`make api`, `make worker`) and both import the entire codebase. A file
+doesn't belong to a process; what determines where a function executes is who CALLS it,
+and it runs in the caller's process. `start_run` lives in `worker/tasks.py` for
+organization, but it's a plain `def` (no `@celery_app.task` on it), so when `create_run`
+calls it, it runs inside the API process, same call stack. Even the `chord(...)` line runs
+in the API process, and all it does is push five JSON messages onto a Redis list and
+return. At that point nothing has executed.
+
+One file, split personality:
+
+| worker/tasks.py | executes in the API | executes in the worker |
+|---|---|---|
+| `start_run()` | yes (called by `create_run`) | |
+| the `chord(...)` enqueue inside it | yes | |
+| `scrape_influencer` body | | yes |
+| `finalize_run` body | | yes |
+
+So how does the worker find out? Not by notification, and not by pub/sub. At boot the
+worker opens one plain TCP socket to Redis (the same kind of long-lived connection the
+API holds to Postgres; no WebSocket needed, backend processes use raw sockets directly)
+and sends BRPOP, a blocking pop. It means "give me the next item from the list named
+celery, and if it's empty, hold my request open until something appears."
+
+```
+WORKER: BRPOP celery ────────▶ REDIS: list is empty. I'll hold this
+        (waits on the open           request open and say nothing.
+         socket, zero CPU)           │
+                                     │   ...seconds pass...
+                                     │
+API:    LPUSH celery {msg} ────────▶ │ item arrived! complete the
+                                     ▼ worker's pending BRPOP with it
+WORKER: ...gets its answer, runs the task, loops back to BRPOP
+```
+
+You've seen this pattern in JS as long-polling, or as `const msg = await queue.get()`, a
+promise that stays pending until someone pushes. The worker was already leaning in with
+its hand out, so delivery feels instant even though nobody triggered anything. And if no
+worker is running, messages just pile up in the list. Try it once: stop `make worker`,
+POST a run, watch it sit queued forever, then start the worker and watch it drain the
+backlog. That's the decoupling made visible.
+
+### Why the jobs don't ride pub/sub
+
+Pub/sub has exactly the two properties a job queue can't tolerate:
+
+```
+                        PUB/SUB (radio)          LIST + BRPOP (mailbox)
+who gets the message    EVERY subscriber         exactly ONE popper
+nobody's listening?     message vanishes         message waits in the list
+```
+
+Play it out with 4 worker children. If jobs went over pub/sub, all 4 would receive all 5
+scrape tasks and every influencer would get scraped 4 times. And a job published while
+every worker was busy would evaporate. The list gives the opposite of both, each message
+popped exactly once (which doubles as free load balancing) and messages wait safely until
+someone's ready. Progress updates want the opposite semantics (every open browser tab
+should hear them, and missing one is fine because Postgres holds the truth), so THEY ride
+pub/sub. Same server, two primitives with opposite guarantees, each matched to its job.
+
+This is also the production scaling story. Add worker boxes, all running the identical
+command against the same broker URL, and the queue load-balances across them
+automatically because a message can only be popped once. In ECS terms the worker is a
+second service scaled on queue depth, zero code change.
+
+Interview: "producers and consumers never reference each other's processes. The producer
+pushes a message naming a task; consumers sit in a blocking pop on the broker, so
+delivery is push-latency without polling, and adding consumers scales throughput with no
+code change."
+
 ## The chord, for a JS developer
 
-`chord` is Celery's distributed `Promise.all`. The three lines in `start_run`:
+First the shape, then the syntax. Fan-out splits one request into N independent parallel
+tasks. Fan-in is the barrier that fires exactly once when all N are done, receiving
+everyone's results:
+
+```
+                    ┌─▶ scrape nick ──┐
+   start_run ───────┼─▶ scrape jane ──┼──────▶ finalize_run([r1..r5])
+   (1 thing)        ├─▶ scrape sam  ──┤        (1 thing again)
+      FAN-OUT       ├─▶ scrape ana  ──┤   FAN-IN (waits for ALL,
+   1 to N parallel  └─▶ scrape bob ──┘    gets everyone's return values)
+```
+
+`chord` is Celery's word for that whole shape, a distributed `Promise.all`. The lines in
+`start_run`:
 
 ```python
 header = [scrape_influencer.s(run_id, inf, run_ts, mode, limit) for inf in payload_infs]
@@ -227,6 +313,91 @@ harmless (the numbers just repeat).
 A refresh now costs nothing. The new connection re-reads the snapshot (Postgres never
 forgot) and rides the deltas from there. There's no per-user registration anywhere; the
 run_id in the URL is the entire subscription.
+
+## Who writes to Postgres
+
+Both processes, deliberately. There's no rule that only one process may touch the
+database; handling many concurrent clients is most of what Postgres does. The rule we DO
+enforce is narrower, both processes write signals through the literal same function
+(`common.signals.insert_signal`), so exactly one code path defines what a valid write is.
+
+```
+API writes (fast bookkeeping)         WORKER writes (the heavy lifting)
+─────────────────────────────         ────────────────────────────────
+INSERT runs row, status queued        UPDATE runs to running
+(inside start_run, so POST /runs      INSERT raw_signals (the actual data,
+ can return the run_id instantly)       via the same insert_signal the API uses)
+                                      UPDATE runs done_count++, inserted++
+regular CRUD endpoints                UPDATE runs to completed/failed
+(POST /signals, /influencers)         REFRESH the rollup matview
+```
+
+The split follows one principle. Anything that must happen before the HTTP response
+returns (the tiny "a run now exists" row) is the API's job; everything slow belongs to
+workers.
+
+## Redis is one big dictionary (its states through a run)
+
+Redis is essentially one big dictionary living in RAM, where every value has a type
+(string, list, hash, ...). The 16 numbered drawers are just 16 separate dictionaries.
+Pub/sub is the one feature that's NOT in the dictionary, a side channel bolted onto the
+same server where nothing is stored. And Redis never invents a key on its own; every key
+below exists because celery library code running in one of OUR processes sent a write
+command over its socket.
+
+Four moments of a demo run with id 3:
+
+```
+T0: idle, before POST /runs
+  db 0: { }                                    ← empty dict
+  db 1: { }
+  pub/sub: no channels, no subscribers
+
+T1: instant after POST /runs (API pushed, workers haven't popped yet)
+  db 0: {
+    "celery": [ msg(scrape nick), msg(scrape jane), msg(scrape sam),
+                msg(scrape ana), msg(scrape bob) ]      ← a LIST value
+  }
+  db 1: { }
+  pub/sub: channel run:3 has 1 subscriber (your browser's SSE stream)
+
+T2: mid-run (4 popped and executing, 1 still queued, 2 finished)
+  db 0: {
+    "celery": [ msg(scrape bob) ]                       ← last one still waiting
+  }
+  db 1: {
+    "chord-unlock-abc123": 2,                           ← the scoreboard. Created by the
+                                                          FIRST finishing task's INCR,
+                                                          bumped by each one after
+    "celery-task-meta-<uuid1>": {result of nick},       ← each finished task's return
+    "celery-task-meta-<uuid2>": {result of jane}          value, serialized
+  }
+  pub/sub: PUBLISH run:3 {"done_count": 2, ...}  ──▶ subscribers hear it, then it's gone
+  (meanwhile the Postgres runs row reads status=running, done_count=2)
+
+T3: after finalize_run
+  db 0: { "celery": [] }                                ← drained
+  db 1: {
+    "celery-task-meta-<uuid1..5>": {...}                ← all 5 results plus finalize's,
+  }                                                       auto-expire in 4h (result_expires)
+  pub/sub: one last PUBLISH run:3 {"status": "completed"}, then silence.
+           The browser closes the stream, subscriber count drops to 0.
+  (the Postgres runs row reads completed, done_count=5. That's the durable record.)
+```
+
+Who reads those keys? The `chord-unlock` counter is how the workers collectively notice
+the barrier is down. Whichever worker child finishes the 5th task sees the counter hit 5,
+collects the five `celery-task-meta` return values into a list, and enqueues
+`finalize_run(results, run_id)` as a new message on the job list, where a worker picks it
+up like any other task. So the fan-in hands off worker to worker, through Redis. The API
+never reads any of this; it fired and forgot at POST time, and it learns outcomes the
+same way the browser does, from Postgres and the megaphone. The task-meta keys then sit
+as leftovers for 4 hours in case something asks "what did task <uuid> return" (nothing in
+our app does), and Redis evicts them.
+
+Notice what's true at T3 plus a few hours. Redis is back to roughly empty. Everything in
+it was scaffolding (queue entries, scoreboards, broadcasts), and the only permanent
+artifacts of the run live in Postgres. That's the design in one sentence.
 
 ## Python syntax survival kit (for the JS developer)
 
@@ -328,5 +499,9 @@ A good first walk, in breakpoint order:
   pub/sub, SSE to the browser. A refresh re-reads the snapshot, so nothing is lost."
 - "Every write is the same idempotent ON CONFLICT upsert, so at-least-once delivery and
   retries are no-ops, not duplicates."
+- "Redis plays three roles, a list as the task queue (competing consumers, so it
+  load-balances), keys as the chord scoreboard, and pub/sub for live broadcast. Queue
+  messages wait for exactly one popper; pub/sub reaches every current subscriber and
+  stores nothing."
 - "Redis is disposable here by design. Lose it and I lose in-flight queue messages and the
   live animation, never the data. Postgres is the system of record."
