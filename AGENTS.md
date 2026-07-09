@@ -13,7 +13,12 @@ in one repo that accumulates. Each finished module gets a git tag (`module-1`,
 - **Module 1, data model.** Partitioned Postgres schema, per-partition indexes, a
   read-path materialized view, EXPLAIN drills, and the FastAPI surface over it.
 - **Module 2, Celery fan-out.** Background scraping jobs writing to the `runs` table on
-  state transitions, live progress in Redis, and a Next.js frontend polling it.
+  state transitions, live progress in Redis, and a Next.js frontend polling it. The fan-in
+  step (after all parallel scrape jobs land their signals) runs `REFRESH MATERIALIZED VIEW
+  CONCURRENTLY daily_signal_rollup`, so the rollup reflects each run the moment it finishes,
+  with a periodic cron (`pg_cron` or a Celery beat task) as a backstop for staleness. This
+  is why Module 1 built the matview with a unique index on `(influencer_id, day)`, the
+  index is what lets `CONCURRENTLY` refresh without locking dashboard readers.
 - **Module 3, AWS-native.** Deploy for real (routed through the app-setup agent, which
   owns the deploy wiring).
 - **Module 4, pgvector.** Semantic search over signals (the `embeddings` table is already
