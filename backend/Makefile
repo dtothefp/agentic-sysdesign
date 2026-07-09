@@ -6,7 +6,7 @@ export DATABASE_URL
 # truth, so there's no generated schema file to keep in sync.
 DBMATE = dbmate --no-dump-schema --migrations-dir db/migrations --url "$(DATABASE_URL)?sslmode=disable"
 
-.PHONY: up migrate rollback status new seed db-init drills setup down reset api openapi
+.PHONY: up migrate rollback status new seed db-init drills setup down reset api openapi scrape
 
 up:
 	docker compose up -d db
@@ -47,6 +47,11 @@ drills:
 # run the FastAPI surface with reload. docs at http://localhost:8000/docs
 api:
 	uv run uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+
+# scrape every watchlist influencer's recent Instagram posts through the API (Apify REST).
+# needs the API running (make api) and APIFY_API_KEY in backend/.env.
+scrape:
+	uv run python ../.claude/skills/scrape-signals/scrape_ig.py
 
 # export the OpenAPI spec to a file the Module 2 frontend codegens a typed client from.
 # app.openapi() only introspects the routes, so this needs no running db or server.

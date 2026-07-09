@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "sysdesign API",
-    "description": "Thin API over the Module 1 competitor-intelligence schema. FastAPI generates the OpenAPI spec automatically: machine-readable at /openapi.json, Swagger UI at /docs, ReDoc at /redoc. The Module 2 frontend codegens a typed client from that spec.",
-    "version": "0.1.0"
+    "description": "Thin API over the Module 1 influencer-intelligence schema. FastAPI generates the OpenAPI spec automatically: machine-readable at /openapi.json, Swagger UI at /docs, ReDoc at /redoc. The Module 2 frontend codegens a typed client from that spec.",
+    "version": "0.2.0"
   },
   "paths": {
     "/health": {
@@ -29,13 +29,13 @@
         }
       }
     },
-    "/competitors": {
+    "/influencers": {
       "get": {
         "tags": [
-          "competitors"
+          "influencers"
         ],
-        "summary": "List Competitors",
-        "operationId": "list_competitors",
+        "summary": "List Influencers",
+        "operationId": "list_influencers",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -43,10 +43,10 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/Competitor"
+                    "$ref": "#/components/schemas/Influencer"
                   },
                   "type": "array",
-                  "title": "Response List Competitors"
+                  "title": "Response List Influencers"
                 }
               }
             }
@@ -55,15 +55,15 @@
       },
       "post": {
         "tags": [
-          "competitors"
+          "influencers"
         ],
-        "summary": "Create Competitor",
-        "operationId": "create_competitor",
+        "summary": "Create Influencer",
+        "operationId": "create_influencer",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CompetitorIn"
+                "$ref": "#/components/schemas/InfluencerIn"
               }
             }
           },
@@ -75,7 +75,60 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Competitor"
+                  "$ref": "#/components/schemas/Influencer"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/influencers/{influencer_id}": {
+      "patch": {
+        "tags": [
+          "influencers"
+        ],
+        "summary": "Update Watermark",
+        "description": "Advance the incremental-scrape watermark. The scraper calls this after a run so the\nnext run only pulls posts newer than last_scraped_at.",
+        "operationId": "update_watermark",
+        "parameters": [
+          {
+            "name": "influencer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Influencer Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InfluencerWatermark"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Influencer"
                 }
               }
             }
@@ -102,7 +155,7 @@
         "operationId": "list_sources",
         "parameters": [
           {
-            "name": "competitor_id",
+            "name": "influencer_id",
             "in": "query",
             "required": false,
             "schema": {
@@ -114,7 +167,7 @@
                   "type": "null"
                 }
               ],
-              "title": "Competitor Id"
+              "title": "Influencer Id"
             }
           }
         ],
@@ -231,7 +284,7 @@
           "signals"
         ],
         "summary": "List Signals",
-        "description": "A time window is REQUIRED so the query always carries the partition key and prunes.\nFiltering by competitor alone (no window) would fan out across every partition, so the\nAPI simply doesn't offer that shape.",
+        "description": "A time window is REQUIRED so the query always carries the partition key and prunes.\nFiltering by influencer alone (no window) would fan out across every partition, so the\nAPI simply doesn't offer that shape.",
         "operationId": "list_signals",
         "parameters": [
           {
@@ -259,7 +312,7 @@
             "description": "end of window (exclusive)"
           },
           {
-            "name": "competitor_id",
+            "name": "influencer_id",
             "in": "query",
             "required": false,
             "schema": {
@@ -271,7 +324,7 @@
                   "type": "null"
                 }
               ],
-              "title": "Competitor Id"
+              "title": "Influencer Id"
             }
           },
           {
@@ -324,7 +377,7 @@
         "operationId": "rollup",
         "parameters": [
           {
-            "name": "competitor_id",
+            "name": "influencer_id",
             "in": "query",
             "required": false,
             "schema": {
@@ -336,7 +389,7 @@
                   "type": "null"
                 }
               ],
-              "title": "Competitor Id"
+              "title": "Influencer Id"
             }
           }
         ],
@@ -371,71 +424,11 @@
   },
   "components": {
     "schemas": {
-      "Competitor": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "domain": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Domain"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "name",
-          "domain",
-          "created_at"
-        ],
-        "title": "Competitor"
-      },
-      "CompetitorIn": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "domain": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Domain"
-          }
-        },
-        "type": "object",
-        "required": [
-          "name"
-        ],
-        "title": "CompetitorIn"
-      },
       "DailyRollup": {
         "properties": {
-          "competitor_id": {
+          "influencer_id": {
             "type": "integer",
-            "title": "Competitor Id"
+            "title": "Influencer Id"
           },
           "day": {
             "type": "string",
@@ -453,7 +446,7 @@
         },
         "type": "object",
         "required": [
-          "competitor_id",
+          "influencer_id",
           "day",
           "signal_count",
           "source_count"
@@ -473,15 +466,89 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "Influencer": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "instagram_handle": {
+            "type": "string",
+            "title": "Instagram Handle"
+          },
+          "last_scraped_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Scraped At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "instagram_handle",
+          "last_scraped_at",
+          "created_at"
+        ],
+        "title": "Influencer"
+      },
+      "InfluencerIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "instagram_handle": {
+            "type": "string",
+            "title": "Instagram Handle"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "instagram_handle"
+        ],
+        "title": "InfluencerIn"
+      },
+      "InfluencerWatermark": {
+        "properties": {
+          "last_scraped_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Scraped At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "last_scraped_at"
+        ],
+        "title": "InfluencerWatermark"
+      },
       "Signal": {
         "properties": {
           "id": {
             "type": "integer",
             "title": "Id"
           },
-          "competitor_id": {
+          "influencer_id": {
             "type": "integer",
-            "title": "Competitor Id"
+            "title": "Influencer Id"
           },
           "source_id": {
             "anyOf": [
@@ -512,7 +579,7 @@
         "type": "object",
         "required": [
           "id",
-          "competitor_id",
+          "influencer_id",
           "source_id",
           "captured_at",
           "content_hash",
@@ -522,9 +589,9 @@
       },
       "SignalIn": {
         "properties": {
-          "competitor_id": {
+          "influencer_id": {
             "type": "integer",
-            "title": "Competitor Id"
+            "title": "Influencer Id"
           },
           "captured_at": {
             "type": "string",
@@ -550,7 +617,7 @@
         },
         "type": "object",
         "required": [
-          "competitor_id",
+          "influencer_id",
           "captured_at",
           "payload"
         ],
@@ -580,9 +647,9 @@
             "type": "integer",
             "title": "Id"
           },
-          "competitor_id": {
+          "influencer_id": {
             "type": "integer",
-            "title": "Competitor Id"
+            "title": "Influencer Id"
           },
           "kind": {
             "type": "string",
@@ -601,7 +668,7 @@
         "type": "object",
         "required": [
           "id",
-          "competitor_id",
+          "influencer_id",
           "kind",
           "url",
           "created_at"
@@ -610,9 +677,9 @@
       },
       "SourceIn": {
         "properties": {
-          "competitor_id": {
+          "influencer_id": {
             "type": "integer",
-            "title": "Competitor Id"
+            "title": "Influencer Id"
           },
           "kind": {
             "type": "string",
@@ -625,7 +692,7 @@
         },
         "type": "object",
         "required": [
-          "competitor_id",
+          "influencer_id",
           "kind",
           "url"
         ],
@@ -679,12 +746,12 @@
       "description": "Liveness + db reachability."
     },
     {
-      "name": "competitors",
-      "description": "The entities we track."
+      "name": "influencers",
+      "description": "The creators we track (Defrag watchlist)."
     },
     {
       "name": "sources",
-      "description": "Where a competitor's signals come from."
+      "description": "Where an influencer's signals come from."
     },
     {
       "name": "signals",

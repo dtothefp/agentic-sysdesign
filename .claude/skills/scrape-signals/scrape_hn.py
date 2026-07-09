@@ -7,9 +7,12 @@ NOTHING makes the second run a no-op. Stories whose publish time predates the ex
 monthly partitions are skipped (the API returns 400), which is the partitioning lesson in
 practice: no partition, no insert.
 
+Secondary example only. The primary scraper is scrape_ig.py (the Defrag watchlist). This one
+stays as a template for any source that exposes clean JSON, mapped onto the same /signals path.
+
 Usage (from the repo root, with the API running via `cd backend && make api`):
   uv run --project backend python .claude/skills/scrape-signals/scrape_hn.py \
-      --competitor-id 1 --query "Postgres" --limit 20
+      --influencer-id 1 --query "Postgres" --limit 20
 """
 import argparse
 import json
@@ -27,9 +30,9 @@ def fetch_hn(query: str, limit: int) -> list[dict]:
         return json.load(r)["hits"]
 
 
-def post_signal(api: str, competitor_id: int, captured_at: str, payload: dict) -> dict:
+def post_signal(api: str, influencer_id: int, captured_at: str, payload: dict) -> dict:
     body = json.dumps(
-        {"competitor_id": competitor_id, "captured_at": captured_at, "payload": payload}
+        {"influencer_id": influencer_id, "captured_at": captured_at, "payload": payload}
     ).encode()
     req = urllib.request.Request(
         api + "/signals",
@@ -43,7 +46,7 @@ def post_signal(api: str, competitor_id: int, captured_at: str, payload: dict) -
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--competitor-id", type=int, required=True)
+    ap.add_argument("--influencer-id", type=int, required=True)
     ap.add_argument("--query", required=True, help="HN search term (e.g. a competitor name)")
     ap.add_argument("--api", default="http://localhost:8000")
     ap.add_argument("--limit", type=int, default=20)
@@ -68,7 +71,7 @@ def main() -> None:
             "story_time": h.get("created_at"),
         }
         try:
-            res = post_signal(args.api, args.competitor_id, captured_at, payload)
+            res = post_signal(args.api, args.influencer_id, captured_at, payload)
             if res.get("inserted"):
                 inserted += 1
             else:

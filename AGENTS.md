@@ -2,9 +2,9 @@
 
 > `CLAUDE.md` and `GEMINI.md` are symlinks to this file.
 
-One repo for the whole system-design build guide, a scaled-down competitor-intelligence
-pipeline built up in modules. Personal interview-prep learning code, internal, never
-client-facing.
+One repo for the whole system-design build guide, a scaled-down influencer-intelligence
+pipeline (Defrag's creator watchlist) built up in modules. Personal interview-prep learning
+code, internal, never client-facing.
 
 The five modules are cumulative layers of a single app, not separate apps, so they live
 in one repo that accumulates. Each finished module gets a git tag (`module-1`,
@@ -55,17 +55,20 @@ make rollback    # undo the most recent migration (its migrate:down)
 make new name=X  # scaffold the next timestamped migration
 make drills      # run drills/explain-drills.sql (whole file, smoke test)
 make api         # run the FastAPI surface (uvicorn, reload) at :8000, docs at /docs
+make scrape      # scrape all watchlist influencers' recent IG posts through the API (Apify)
 make openapi     # export the OpenAPI spec to backend/openapi.json (no db/server needed)
 make down        # drop the volume
 make reset       # down then setup
 uv run python -m common.seed   # re-seed (idempotent, inserts nothing the second time)
 ```
 
-The FastAPI app lives in `backend/api/` (`api.main:app`). Endpoints: `/competitors`,
-`/sources`, `/signals` (POST is the idempotent `ON CONFLICT` upsert, content_hash derived
-server-side; GET requires a `from`/`to` window so it always prunes), and `/rollup` (reads
-the matview). To populate real data, use the in-repo `scrape-signals` skill
-(`.claude/skills/scrape-signals/`), which POSTs public data through the API.
+The FastAPI app lives in `backend/api/` (`api.main:app`). Endpoints: `/influencers` (POST
+upserts on instagram_handle; PATCH advances the last_scraped_at watermark), `/sources`,
+`/signals` (POST is the idempotent `ON CONFLICT` upsert, content_hash derived server-side;
+GET requires a `from`/`to` window so it always prunes), and `/rollup` (reads the matview). To
+populate real data, use the in-repo `scrape-signals` skill (`.claude/skills/scrape-signals/`,
+`make scrape`), which pulls each watchlist influencer's recent Instagram posts through the API
+via the Apify REST API. Needs `APIFY_API_KEY` in `backend/.env` (gitignored, never commit it).
 
 FastAPI generates the OpenAPI spec automatically (`/openapi.json`, Swagger at `/docs`,
 ReDoc at `/redoc`); no separate OpenAPI library. `operationId`s are the handler names so
@@ -100,7 +103,7 @@ block too, so rollback works.
 ## The one idempotency sentence
 
 At-least-once delivery is assumed everywhere. Every write is an idempotent upsert keyed
-on `(competitor_id, content_hash, captured_at)` via `INSERT ... ON CONFLICT DO NOTHING`,
+on `(influencer_id, content_hash, captured_at)` via `INSERT ... ON CONFLICT DO NOTHING`,
 so reprocessing the same item twice is a no-op. That answers most "what if it runs
 twice" and "how do you avoid duplicates" probes.
 

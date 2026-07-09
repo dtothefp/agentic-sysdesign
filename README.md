@@ -1,7 +1,8 @@
 # sysdesign
 
-A system-design build guide, built as one real app: a scaled-down competitor-intelligence
-pipeline that grows module by module. Each module is one interview competency, and building
+A system-design build guide, built as one real app: a scaled-down influencer-intelligence
+pipeline (Defrag's creator watchlist) that grows module by module. Each module is one
+interview competency, and building
 it is the prep. This is throwaway learning code, not a product. The point is to have run
 it, broken it, and read the query plans, so a backend round has nothing in it you haven't
 already touched with your hands.
@@ -65,8 +66,13 @@ RANGE partitioned by `captured_at`, the partition key inside every unique constr
 durable `runs` job-of-record table that Module 2 writes to on state transitions while
 pushing high-frequency progress to a Redis cache). `20260708000002_monthly_partitions.sql`
 adds the monthly child partitions and an idempotent `create_month_partition(date)`
-maintenance function (the production answer is `pg_partman`). These files are the single
-source of truth for the schema shape.
+maintenance function (the production answer is `pg_partman`).
+`20260708000003_influencer_signals_schema.sql` reframes the domain from generic competitors
+to Defrag's influencer watchlist: it renames `competitors` to `influencers`, renames
+`competitor_id` to `influencer_id` everywhere (one ALTER cascades across all raw_signals
+partitions), adds `instagram_handle` and the `last_scraped_at` scrape watermark, and rebuilds
+the rollup matview. All renames, no data dropped, so you can read exactly what moved. These
+files are the single source of truth for the schema shape.
 
 ## API
 
@@ -76,15 +82,18 @@ A thin FastAPI surface over the schema lives in `backend/api/`. Run it from `bac
 make api    # uvicorn at http://localhost:8000, interactive docs at /docs
 ```
 
-Endpoints: `/competitors`, `/sources`, `/signals`, `/rollup`. Two things it's built to show.
+Endpoints: `/influencers`, `/sources`, `/signals`, `/rollup`. Two things it's built to show.
 `POST /signals` is the idempotent `ON CONFLICT DO NOTHING` upsert with `content_hash` derived
 server-side, so re-POSTing the identical signal is a no-op. `GET /signals` requires a
 `from`/`to` window, so every read carries the partition key and prunes to the relevant
-month(s) instead of fanning across all partitions.
+month(s) instead of fanning across all partitions. `PATCH /influencers/{id}` advances the
+`last_scraped_at` watermark the incremental scraper reads.
 
 To fill the database with real (not synthetic) data, use the in-repo `scrape-signals` skill
-(`.claude/skills/scrape-signals/`). It scrapes public sources (Hacker News to start) and
-POSTs them through the API, so the data takes the same idempotent path the app uses.
+(`.claude/skills/scrape-signals/`). `make scrape` pulls each watchlist influencer's recent
+Instagram posts through the API (Apify REST, all influencers in parallel, incremental off each
+one's watermark), so the data takes the same idempotent path the app uses. Needs `APIFY_API_KEY`
+in `backend/.env` (gitignored).
 
 ### OpenAPI
 
