@@ -1,0 +1,43 @@
+<svg viewBox="0 0 700 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t d">
+  <title id="t">How Postgres stores a table as pages on disk and copies a few into memory</title>
+  <desc id="d">A table is thousands of 8KB pages on disk. A query copies only the pages it needs into memory. Indexes, partitions, and materialized views exist to reduce how many pages get copied.</desc>
+
+  <!-- theme-neutral grays/blues so this renders on both GitHub light and dark backgrounds -->
+  <text x="20" y="30" font-size="18" font-weight="600" fill="#8b949e" font-family="system-ui, sans-serif">how Postgres really stores a table</text>
+  <text x="20" y="54" font-size="14" fill="#8b949e" font-family="system-ui, sans-serif">not a spreadsheet, just pages of bytes on disk, a few copied into memory to work on</text>
+
+  <!-- disk -->
+  <text x="20" y="90" font-size="15" font-weight="600" fill="#8b949e" font-family="system-ui, sans-serif">disk (durable, big, slow)</text>
+  <rect x="20" y="100" width="280" height="212" rx="10" fill="none" stroke="#8b949e" stroke-opacity="0.5"/>
+  <g fill="#8b949e" fill-opacity="0.3" stroke="#8b949e" stroke-opacity="0.6">
+    <rect x="48"  y="120" width="22" height="22" rx="3"/><rect x="77"  y="120" width="22" height="22" rx="3"/><rect x="106" y="120" width="22" height="22" rx="3"/><rect x="135" y="120" width="22" height="22" rx="3"/><rect x="164" y="120" width="22" height="22" rx="3"/><rect x="193" y="120" width="22" height="22" rx="3"/><rect x="222" y="120" width="22" height="22" rx="3"/><rect x="251" y="120" width="22" height="22" rx="3"/>
+    <rect x="48"  y="149" width="22" height="22" rx="3"/><rect x="77"  y="149" width="22" height="22" rx="3"/><rect x="106" y="149" width="22" height="22" rx="3"/><rect x="135" y="149" width="22" height="22" rx="3"/><rect x="164" y="149" width="22" height="22" rx="3"/><rect x="193" y="149" width="22" height="22" rx="3"/><rect x="222" y="149" width="22" height="22" rx="3"/><rect x="251" y="149" width="22" height="22" rx="3"/>
+    <rect x="48"  y="178" width="22" height="22" rx="3"/><rect x="77"  y="178" width="22" height="22" rx="3"/><rect x="106" y="178" width="22" height="22" rx="3"/><rect x="135" y="178" width="22" height="22" rx="3"/><rect x="164" y="178" width="22" height="22" rx="3"/><rect x="193" y="178" width="22" height="22" rx="3"/><rect x="222" y="178" width="22" height="22" rx="3"/><rect x="251" y="178" width="22" height="22" rx="3"/>
+    <rect x="48"  y="207" width="22" height="22" rx="3"/><rect x="77"  y="207" width="22" height="22" rx="3"/><rect x="106" y="207" width="22" height="22" rx="3"/><rect x="135" y="207" width="22" height="22" rx="3"/><rect x="164" y="207" width="22" height="22" rx="3"/><rect x="193" y="207" width="22" height="22" rx="3"/><rect x="222" y="207" width="22" height="22" rx="3"/><rect x="251" y="207" width="22" height="22" rx="3"/>
+    <rect x="48"  y="236" width="22" height="22" rx="3"/><rect x="77"  y="236" width="22" height="22" rx="3"/><rect x="106" y="236" width="22" height="22" rx="3"/><rect x="135" y="236" width="22" height="22" rx="3"/><rect x="164" y="236" width="22" height="22" rx="3"/><rect x="193" y="236" width="22" height="22" rx="3"/><rect x="222" y="236" width="22" height="22" rx="3"/><rect x="251" y="236" width="22" height="22" rx="3"/>
+    <rect x="48"  y="265" width="22" height="22" rx="3"/><rect x="77"  y="265" width="22" height="22" rx="3"/><rect x="106" y="265" width="22" height="22" rx="3"/><rect x="135" y="265" width="22" height="22" rx="3"/><rect x="164" y="265" width="22" height="22" rx="3"/><rect x="193" y="265" width="22" height="22" rx="3"/><rect x="222" y="265" width="22" height="22" rx="3"/><rect x="251" y="265" width="22" height="22" rx="3"/>
+  </g>
+  <text x="160" y="303" font-size="12" fill="#8b949e" text-anchor="middle" font-family="system-ui, sans-serif">each square = one 8KB page</text>
+
+  <!-- arrow -->
+  <defs>
+    <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#8b949e"/></marker>
+  </defs>
+  <line x1="304" y1="200" x2="394" y2="200" stroke="#8b949e" stroke-width="2.5" marker-end="url(#ah)"/>
+  <text x="349" y="190" font-size="12" fill="#8b949e" text-anchor="middle" font-family="system-ui, sans-serif">a query</text>
+  <text x="349" y="222" font-size="12" fill="#8b949e" text-anchor="middle" font-family="system-ui, sans-serif">reads pages</text>
+
+  <!-- memory -->
+  <text x="400" y="90" font-size="15" font-weight="600" fill="#8b949e" font-family="system-ui, sans-serif">memory / RAM (fast, small)</text>
+  <rect x="400" y="100" width="280" height="212" rx="10" fill="none" stroke="#1f6feb" stroke-opacity="0.5"/>
+  <g fill="#1f6feb" fill-opacity="0.75">
+    <rect x="514" y="176" width="22" height="22" rx="3"/><rect x="543" y="176" width="22" height="22" rx="3"/>
+    <rect x="514" y="205" width="22" height="22" rx="3"/><rect x="543" y="205" width="22" height="22" rx="3"/>
+  </g>
+  <text x="540" y="252" font-size="12" fill="#8b949e" text-anchor="middle" font-family="system-ui, sans-serif">only the pages you pulled</text>
+
+  <!-- punchline -->
+  <text x="20" y="358" font-size="16" font-weight="600" fill="#8b949e" font-family="system-ui, sans-serif">indexes, partitions, and materialized views all do one thing</text>
+  <text x="20" y="382" font-size="16" fill="#8b949e" font-family="system-ui, sans-serif">they make the query pull fewer squares</text>
+  <text x="20" y="420" font-size="13" fill="#8b949e" font-family="system-ui, sans-serif">EXPLAIN (ANALYZE, BUFFERS) literally counts the squares moved. fewer squares = faster.</text>
+</svg>
