@@ -381,6 +381,19 @@ A refresh now costs nothing. The new connection re-reads the snapshot (Postgres 
 forgot) and rides the deltas from there. There's no per-user registration anywhere; the
 run_id in the URL is the entire subscription.
 
+### Those `: ping` lines in the stream
+
+Watch a run with `curl -N` and between events you'll see lines like `: ping - 2026-07-09
+22:02:09`. In the SSE protocol a line starting with a colon is a comment, and clients
+ignore it. sse-starlette sends one every 15 seconds as a keepalive, so the connection
+never looks dead to proxies, load balancers, or idle timeouts along the way. Any
+long-lived HTTP connection needs a heartbeat; this one comes free with the library.
+
+They also make a nice decoupling proof. Freeze the worker at a debugger breakpoint for two
+minutes and the pings keep arriving on schedule, no deltas (the publisher is frozen) but a
+live connection (the relayer doesn't notice or care). Two processes, genuinely
+independent, demonstrated in your own terminal.
+
 ## Who writes to Postgres
 
 Both processes, deliberately. There's no rule that only one process may touch the
@@ -615,6 +628,103 @@ curl -N localhost:8000/runs/<run_id>/stream
 `demo` mode inserts synthetic signals with a 0.4s delay each (watch the bar move, zero
 Apify spend). `live` mode does the real Apify scrape off each influencer's watermark.
 
+## Watermarks (how live mode stays incremental)
+
+A watermark is a saved position marker, "I've processed everything up to HERE, next time
+start from here." Same pattern as a Kafka consumer offset, a pagination cursor, or an
+`If-Modified-Since` header. Each influencer row carries `last_scraped_at`; NULL means
+first scrape (fetch just the newest post), otherwise the run asks Apify for
+`onlyPostsNewerThan: watermark` and advances the watermark afterward. Three details
+matter.
+
+**It's set to the run's START time, not the newest post seen.** `run_ts` is stamped in
+`start_run` before anything is fetched. If it were set to the scrape's end time, a post
+published while the scrape was running could land behind the watermark and be missed
+forever. Start-time watermarks mean the next run re-covers the minutes the scrape took,
+deliberately overlapping windows.
+
+**The overlap is safe only because of the upsert.** Re-fetching a post you already have is
+a free no-op through `ON CONFLICT DO NOTHING`. That's the two-layer shape nearly every
+incremental pipeline converges on:
+
+```
+watermark  = EFFICIENCY   don't re-FETCH old stuff   (saves Apify money)
+upsert     = CORRECTNESS  re-fetching is harmless    (covers the watermark's edges)
+```
+
+Neither layer alone works. Watermark without upsert, any overlap creates duplicates.
+Upsert without watermark, every run re-scrapes (and re-pays for) the full history.
+
+**Failed tasks don't advance it.** The watermark UPDATE sits after the scrape call, so an
+exception skips it and the failed window stays open. The next successful run picks up
+everything the failed one missed, retry semantics for free, no repair step.
+
+### A real 400, and why error bodies matter
+
+The first live run ever attempted failed all 5 tasks with `HTTPError: HTTP Error 400: Bad
+Request` and nothing else, because the original `_apify_run` discarded the HTTP response
+body. Reading that body gave the actual reason in one line, Apify validates
+`onlyPostsNewerThan` against a regex that accepts ISO timestamps ending in `Z` only, and
+Python's `isoformat()` spells UTC as `+00:00`. The scrape-signals skill never hit this
+because it reads the watermark from the API's JSON, where pydantic spells UTC as `Z`.
+Same database column, two spellings, one strict regex.
+
+Two fixes shipped. The watermark is normalized to `%Y-%m-%dT%H:%M:%SZ`, and `_apify_run`
+now raises with the response body included, so the run's `error` column stores the real
+reason. The lesson is bigger than the bug, error messages are stored observability, and
+run 5's row (five useless copies of "400 Bad Request") is a monument to what happens when
+you throw the good part away. The failure cost nothing, input-validation rejections never
+start an actor run.
+
+## Validating a run (and what failure looks like)
+
+After a `done` event, every durable artifact the run was supposed to change can be
+checked in psql:
+
+```sql
+-- 1. the run's own record: status, counts, timestamps, error
+SELECT id, status, done_count, total, inserted, error, finished_at
+FROM runs WHERE id = 6;
+
+-- 2. the data landed (live rows carry source=instagram in the payload)
+SELECT i.instagram_handle, s.captured_at, left(s.payload->>'caption', 70)
+FROM raw_signals s JOIN influencers i ON i.id = s.influencer_id
+WHERE s.payload->>'source' = 'instagram' ORDER BY s.id DESC LIMIT 10;
+
+-- 3. the rollup is fresh: zero rows = the cache agrees with the truth everywhere
+SELECT influencer_id, date_trunc('day', captured_at) AS day, count(*)
+FROM raw_signals GROUP BY 1, 2
+EXCEPT
+SELECT influencer_id, day, signal_count FROM daily_signal_rollup;
+
+-- 4. watermarks advanced to this run's run_ts
+SELECT instagram_handle, last_scraped_at FROM influencers ORDER BY id;
+```
+
+Then the best validation of all, POST another live run immediately. Every task should
+report `inserted: 0` (nothing newer than a watermark set minutes ago). A pipeline you can
+run twice and get a no-op is the idempotency contract proven end to end.
+
+**Failure shapes.** A task that scraped fine but found nothing new is NOT a failure; it
+looks like `inserted: 0, error: null` in the stream and like nothing at all in the
+database. A task that broke carries its message in the progress event, and `finalize_run`
+writes the joined per-handle messages into `runs.error`. Status is `failed` only when ALL
+tasks errored; partial failure stays `completed` with the failing handles listed in
+`error`. Note `done_count` still reaches total on a fully failed run, errored tasks count,
+that's the swallow-and-continue design that lets the chord fire and the run close instead
+of hanging at `running` forever.
+
+**What's deliberately NOT stored.** `raw_signals` has no `run_id` column, so "which run
+inserted this row" isn't recorded, a signal is a fact about the world (rourke posted X at
+time T), not about the scraping process, and dedup means two runs can both "insert" the
+same post. Reconstructing a run's rows means inferring from insert order (`ORDER BY id
+DESC`) or the watermark window. Relatedly, `captured_at` is the post's PUBLISH time (event
+time), not when the pipeline stored it (ingestion time), so live rows land on the day they
+were posted, filed into whichever partition covers that date. If run-level provenance or
+ingestion time ever mattered (auditing, retry dashboards), that's a schema decision, an
+`ingested_at` column or a `run_items` table. The database remembers exactly what you
+design it to remember.
+
 ## Debugging it (stepping through the flow)
 
 `.vscode/launch.json` has three entries for Cursor's Run and Debug panel, made for exactly
@@ -638,6 +748,14 @@ A good first walk, in breakpoint order:
 5. `api/main.py` `gen()` inside `stream_run` (attach a `curl -N` first), watch the
    snapshot yield, then each delta arrive.
 
+Expect each influencer to "catch" several times. Play means "run until the NEXT
+breakpoint", so with breakpoints at the task top, the done_count UPDATE, and `_publish`,
+one task stops three times before `inf` changes. Nothing is running twice; the stops are
+geography. The tells are the yellow highlighted line (different line each stop, same
+influencer) and the Call Stack panel (`_publish` on top means you're inside the megaphone
+call, `scrape_influencer` on top means you're in the task body). For one stop per
+influencer, uncheck all but one breakpoint in the Breakpoints panel.
+
 ## Interview soundbites
 
 - "The POST returns a job id immediately; the work happens in workers pulled off a Redis
@@ -658,3 +776,10 @@ A good first walk, in breakpoint order:
   callback refreshes it the moment a run completes, a periodic beat task is the staleness
   backstop, and REFRESH CONCURRENTLY over a unique index means readers never block during
   the rebuild."
+- "Each source keeps a watermark, the run START time of the last successful scrape. Only
+  advanced on success, so failures self-heal on the next run, and set to the start rather
+  than the end so nothing published mid-scrape falls in a gap. Any overlap dedupes through
+  the idempotent upsert."
+- "The raw table keys on event time, not ingestion time. If we needed run-level provenance
+  we'd add an ingested_at or run_id column, but dedup means a row can belong to two runs,
+  so 'which run inserted this' is genuinely ambiguous by design."
