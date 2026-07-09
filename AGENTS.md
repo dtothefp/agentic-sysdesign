@@ -25,6 +25,8 @@ in one repo that accumulates. Each finished module gets a git tag (`module-1`,
   dashboard readers. Runs have a `demo` mode (synthetic signals, no Apify spend) for watching
   the fan-out and SSE stream cheaply, and a `live` mode (real Apify scrape). Backend lives in
   `backend/worker/` (`celery_app.py`, `tasks.py`, `scrape.py`); run it with `make worker`.
+  Full first-principles walkthrough (Redis's two hats, chord = distributed Promise.all,
+  snapshot-then-deltas SSE, debugging with `--pool solo`) in [docs/module-2.md](docs/module-2.md).
 - **Module 3, AWS-native.** Deploy for real (routed through the app-setup agent, which
   owns the deploy wiring).
 - **Module 4, pgvector.** Semantic search over signals (the `embeddings` table is already
