@@ -6,7 +6,7 @@ export DATABASE_URL
 # truth, so there's no generated schema file to keep in sync.
 DBMATE = dbmate --no-dump-schema --migrations-dir db/migrations --url "$(DATABASE_URL)?sslmode=disable"
 
-.PHONY: up migrate rollback status new seed db-init drills setup down reset api openapi
+.PHONY: up migrate rollback status new seed seed-influencers db-init db-fresh drills setup down reset api openapi
 
 up:
 	docker compose up -d db
@@ -31,15 +31,30 @@ status:
 new:
 	$(DBMATE) new $(name)
 
+# full seed: the watchlist AND 4000 synthetic signals, so the EXPLAIN drills have volume.
 seed:
 	uv run python -m common.seed
 	psql "$(DATABASE_URL)" -c "REFRESH MATERIALIZED VIEW daily_signal_rollup;"
 
-# migrate + seed against whatever DATABASE_URL points at, WITHOUT starting a container.
-# Use this inside the dev container, where Postgres is already running as a sibling (db:5432).
-# On the host, prefer `make setup`.
+# seed ONLY the watchlist influencers (from the skill's watchlist.json). No signal volume.
+seed-influencers:
+	uv run python -m common.seed --influencers-only
+
+# migrate + full seed (influencers + drill volume) against whatever DATABASE_URL points at,
+# WITHOUT starting a container. Use inside the dev container (Postgres is a sibling at db:5432).
+# On the host, prefer `make setup`. Use `make db-fresh` if you want a clean db with just the
+# influencers and none of the synthetic signals.
 db-init: migrate seed
 	@echo "db initialized at $(DATABASE_URL)"
+
+# DEV CONTAINER clean slate: drop the whole db, re-apply every migration from empty, then seed
+# ONLY the influencers (no synthetic signals, no leftover rows). This is the "new database, just
+# the watchlist" path. Stop `make api` first, since an open connection blocks DROP DATABASE.
+db-fresh:
+	$(DBMATE) drop || true
+	$(DBMATE) up
+	uv run python -m common.seed --influencers-only
+	@echo "fresh db at $(DATABASE_URL): migrations applied, influencers seeded, no signals. run 'make seed' later if you want drill volume."
 
 drills:
 	psql "$(DATABASE_URL)" -f drills/explain-drills.sql

@@ -130,12 +130,18 @@ once and is only useful as a smoke test.
 
   ```bash
   cd backend
-  make db-init   # schema + partitions + seed, no `docker compose up` (db is already a sibling here)
+  make db-init   # schema + partitions + full seed, no `docker compose up` (db is a sibling here)
   make drills
   ```
 
   Use `db-init` inside the container, not `make setup`. `setup` tries to `docker compose up`
   a db, which is the host workflow; inside the container the db is already running.
+
+  `db-init` runs the *full* seed (the watchlist plus 4000 synthetic signals, so the drills have
+  volume). If you just want a clean database with only the influencers and none of the synthetic
+  rows, run `make db-fresh` instead: it drops the db, re-applies every migration from empty, and
+  seeds only the watchlist. Stop `make api` first, since an open connection blocks the drop.
+  `make seed-influencers` seeds just the watchlist without touching the schema.
 - `.cursor/environment.json`. The config Cursor Cloud Agents read to boot their own
   environment. Installs `uv` and the Postgres client, syncs deps in `backend/`, and brings
   up the db. Cloud agents run in a Docker container on a VM. If docker-in-docker is not

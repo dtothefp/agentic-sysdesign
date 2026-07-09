@@ -47,12 +47,15 @@ All from `backend/`:
 
 ```bash
 cd backend
-make setup       # HOST: docker compose up db, then migrate + seed
-make db-init     # DEV CONTAINER: migrate + seed, no `docker compose up` (db is a sibling)
+make setup       # HOST: docker compose up db, then migrate + full seed
+make db-init     # DEV CONTAINER: migrate + full seed (influencers + 4000 drill signals)
+make db-fresh    # DEV CONTAINER: drop db, re-migrate from empty, seed ONLY influencers (no signals)
 make migrate     # apply pending dbmate migrations (db/migrations/*.sql)
 make status      # which migrations have run vs pending
 make rollback    # undo the most recent migration (its migrate:down)
 make new name=X  # scaffold the next timestamped migration
+make seed        # full seed: watchlist + 4000 synthetic signals (drill volume)
+make seed-influencers  # just the watchlist, no signals
 make drills      # run drills/explain-drills.sql (whole file, smoke test)
 make api         # run the FastAPI surface (uvicorn, reload) at :8000, docs at /docs
 make openapi     # export the OpenAPI spec to backend/openapi.json (no db/server needed)

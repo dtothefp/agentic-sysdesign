@@ -17,8 +17,10 @@ Every insert is idempotent on the locked unique key, so running this twice inser
 the second time. That one line of SQL is the idempotency contract and the answer to most
 "what if it runs twice" probes.
 
-Run:  uv run python -m common.seed
+Run:  uv run python -m common.seed                    # influencers + 4000 synthetic signals
+      uv run python -m common.seed --influencers-only  # just the watchlist, no signals
 """
+import argparse
 import json
 import random
 from datetime import datetime, timedelta, timezone
@@ -49,6 +51,14 @@ random.seed(42)
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--influencers-only",
+        action="store_true",
+        help="seed just the watchlist, skip the 4000 synthetic signals (drill volume)",
+    )
+    args = ap.parse_args()
+
     watchlist = load_watchlist()
     with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
         ids = []
@@ -60,6 +70,11 @@ def main() -> None:
                 (row["name"], row["instagram_handle"].lstrip("@").lower()),
             )
             ids.append(cur.fetchone()[0])
+
+        if args.influencers_only:
+            conn.commit()
+            print(f"influencers: {len(ids)} (no signals seeded)")
+            return
 
         start = datetime(2026, 5, 1, tzinfo=timezone.utc)
         inserted = 0
