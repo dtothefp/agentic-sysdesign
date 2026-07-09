@@ -275,6 +275,64 @@ in memory. Here the 5 tasks run in different worker processes at unpredictable t
 single process can hold that counter. Celery keeps it in the result backend (Redis /1);
 each finishing task increments it, and whoever brings it to 5 triggers the callback.
 
+### The callback is data, not code
+
+This is where the `Promise.all` analogy genuinely breaks, and it's worth slowing down on.
+In JS, the process that called `Promise.all(...).then(finalize)` keeps the pending state
+and the callback function in its own memory, stays alive, and its own event loop fires the
+callback. The Celery chord keeps NOTHING in the caller. Functions aren't serializable, so
+`finalize_run.s(run_id)` gets turned into a description (the task's registered NAME plus
+its args), and a copy of that description is stamped into each of the 5 queue messages:
+
+```
+one message sitting in the Redis list:
+{
+  "task": "worker.tasks.scrape_influencer",
+  "args": [3, {"handle": "nick", ...}, ...],
+  "chord": {                                  ← the callback, as DATA
+    "task": "worker.tasks.finalize_run",
+    "args": [3],
+    "chord_size": 5
+  }
+}
+```
+
+The worker turns that name back into a function by looking it up in its task registry,
+built at boot when it imported `worker/tasks.py` (that's what `include=["worker.tasks"]`
+in celery_app.py is for). Ship the name, look up the code on the other side; that's the
+whole trick for moving "a function call" between processes.
+
+Once those messages are pushed, the API is done, completely. You could kill the API one
+second after POST and the run would still finish. So who fires the callback? The LAST
+worker to finish, running library code. Every worker, as part of finishing any task,
+runs a little epilogue Celery bolts on:
+
+```
+worker child finishes scrape_influencer(...)
+  │
+  ├─ store my return value            ──▶ Redis /1  (celery-task-meta-<uuid>)
+  ├─ this message had a "chord" field, so:
+  │     INCR the chord counter        ──▶ Redis /1  (chord-unlock-abc123)
+  │
+  └─ did MY increment make it hit 5?
+        no  → done, go BRPOP the next task
+        yes → I'm the closer. Fetch all 5 stored results,
+              build the finalize_run message, LPUSH it   ──▶ Redis /0
+              (finalize_run then runs like any other task,
+               in whichever worker pops it)
+```
+
+Four workers answer "no" and walk away; the fifth enqueues the callback. Nobody watches,
+nobody subscribes. The check happens inline at the moment each task completes, and the
+counter lives in Redis so the check is race-safe across processes. The API never learns
+the run finished; the only reason the browser does is that finalize_run writes
+`completed` to Postgres and publishes on the megaphone.
+
+Interview: "a Celery chord has no coordinator process. The callback travels as data
+inside each header message, completion is a counter in the result backend, and whichever
+worker finishes last enqueues the callback. The caller can die immediately and the chord
+completes anyway. The coordination is decentralized, so no single crash loses the run."
+
 ## SSE and why a page refresh loses nothing
 
 Server-Sent Events is the simple half of WebSockets. The browser opens a plain GET and the
