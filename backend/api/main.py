@@ -118,6 +118,24 @@ def create_influencer(inf: InfluencerIn):
         )
 
 
+@app.post("/influencers/bulk", response_model=list[Influencer], tags=["influencers"])
+def create_influencers(infs: list[InfluencerIn]):
+    """Seed the whole watchlist in one call. Same idempotent upsert as the single POST, run
+    once per row inside a single transaction. This is how the scrape-signals skill loads the
+    watchlist before scraping (POST the list, then GET it back for ids)."""
+    with pool.connection() as conn:
+        cur = conn.cursor(row_factory=dict_row)
+        return [
+            cur.execute(
+                "INSERT INTO influencers (name, instagram_handle) VALUES (%s, %s) "
+                "ON CONFLICT (instagram_handle) DO UPDATE SET name = EXCLUDED.name "
+                "RETURNING id, name, instagram_handle, last_scraped_at, created_at",
+                (inf.name, inf.instagram_handle.lstrip("@").lower()),
+            ).fetchone()
+            for inf in infs
+        ]
+
+
 @app.patch("/influencers/{influencer_id}", response_model=Influencer, tags=["influencers"])
 def update_watermark(influencer_id: int, w: InfluencerWatermark):
     """Advance the incremental-scrape watermark. The scraper calls this after a run so the

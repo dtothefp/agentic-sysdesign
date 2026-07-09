@@ -82,25 +82,28 @@ A thin FastAPI surface over the schema lives in `backend/api/`. Run it from `bac
 make api    # uvicorn at http://localhost:8000, interactive docs at /docs
 ```
 
-Endpoints: `/influencers`, `/sources`, `/signals`, `/rollup`. Two things it's built to show.
-`POST /signals` is the idempotent `ON CONFLICT DO NOTHING` upsert with `content_hash` derived
-server-side, so re-POSTing the identical signal is a no-op. `GET /signals` requires a
-`from`/`to` window, so every read carries the partition key and prunes to the relevant
-month(s) instead of fanning across all partitions. `PATCH /influencers/{id}` advances the
-`last_scraped_at` watermark the incremental scraper reads.
+Endpoints: `/influencers` (`POST` a single creator or `POST /influencers/bulk` for the whole
+watchlist, both upsert on `instagram_handle`), `/sources`, `/signals`, `/rollup`. Two things
+it's built to show. `POST /signals` is the idempotent `ON CONFLICT DO NOTHING` upsert with
+`content_hash` derived server-side, so re-POSTing the identical signal is a no-op. `GET /signals`
+requires a `from`/`to` window, so every read carries the partition key and prunes to the
+relevant month(s) instead of fanning across all partitions. `PATCH /influencers/{id}` advances
+the `last_scraped_at` watermark the incremental scraper reads.
 
 To fill the database with real (not synthetic) data, use the in-repo `scrape-signals` skill
-(`.claude/skills/scrape-signals/`). `make scrape` pulls each watchlist influencer's recent
-Instagram posts through the API (Apify REST, all influencers in parallel, incremental off each
-one's watermark), so the data takes the same idempotent path the app uses. Needs `APIFY_API_KEY`
-in `backend/.env` (gitignored).
+(`.claude/skills/scrape-signals/`), which is how Claude Code drives the database. It's a loop
+entirely over the API: `POST /influencers/bulk` to seed the watchlist, `GET /influencers` to
+read them back, scrape each one's recent Instagram posts (Apify REST, all in parallel,
+incremental off each watermark), then `POST /signals` for each post. Every write takes the same
+idempotent path the app uses. Needs `APIFY_API_KEY` in `backend/.env` (gitignored). There's no
+`make scrape`; the scrape is a skill Claude Code runs, not a build target.
 
 ### OpenAPI
 
 FastAPI generates the OpenAPI spec automatically from the Pydantic models and route
 signatures. No extra library. While `make api` is running, the spec is machine-readable at
 `/openapi.json`, with Swagger UI at `/docs` and ReDoc at `/redoc`. `operationId`s are the
-handler names (`listSignals`, `createSignal`) so a generated client reads cleanly.
+handler names (`list_signals`, `create_signal`) so a generated client reads cleanly.
 
 `make openapi` writes the spec to `backend/openapi.json` without a running db or server (it
 only introspects the routes). That file is the codegen input for the Module 2 Next.js

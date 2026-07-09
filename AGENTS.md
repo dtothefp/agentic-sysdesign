@@ -55,24 +55,26 @@ make rollback    # undo the most recent migration (its migrate:down)
 make new name=X  # scaffold the next timestamped migration
 make drills      # run drills/explain-drills.sql (whole file, smoke test)
 make api         # run the FastAPI surface (uvicorn, reload) at :8000, docs at /docs
-make scrape      # scrape all watchlist influencers' recent IG posts through the API (Apify)
 make openapi     # export the OpenAPI spec to backend/openapi.json (no db/server needed)
 make down        # drop the volume
 make reset       # down then setup
 uv run python -m common.seed   # re-seed (idempotent, inserts nothing the second time)
 ```
 
-The FastAPI app lives in `backend/api/` (`api.main:app`). Endpoints: `/influencers` (POST
-upserts on instagram_handle; PATCH advances the last_scraped_at watermark), `/sources`,
-`/signals` (POST is the idempotent `ON CONFLICT` upsert, content_hash derived server-side;
-GET requires a `from`/`to` window so it always prunes), and `/rollup` (reads the matview). To
-populate real data, use the in-repo `scrape-signals` skill (`.claude/skills/scrape-signals/`,
-`make scrape`), which pulls each watchlist influencer's recent Instagram posts through the API
-via the Apify REST API. Needs `APIFY_API_KEY` in `backend/.env` (gitignored, never commit it).
+The FastAPI app lives in `backend/api/` (`api.main:app`). Endpoints: `/influencers` (POST a
+single creator, POST `/influencers/bulk` for the whole watchlist, both upsert on
+instagram_handle; PATCH advances the last_scraped_at watermark), `/sources`, `/signals` (POST
+is the idempotent `ON CONFLICT` upsert, content_hash derived server-side; GET requires a
+`from`/`to` window so it always prunes), and `/rollup` (reads the matview). To populate real
+data, use the in-repo `scrape-signals` skill (`.claude/skills/scrape-signals/`), which is how
+Claude Code drives the database. It's a loop over the API: POST the watchlist, GET it back,
+scrape each creator's recent IG posts (Apify REST, in parallel, incremental off each
+watermark), then POST each post to `/signals`. There's no `make scrape`; it's a skill Claude
+Code runs, not a build target. Needs `APIFY_API_KEY` in `backend/.env` (gitignored, never commit it).
 
 FastAPI generates the OpenAPI spec automatically (`/openapi.json`, Swagger at `/docs`,
-ReDoc at `/redoc`); no separate OpenAPI library. `operationId`s are the handler names so
-generated clients read cleanly. `make openapi` dumps the spec to `backend/openapi.json`
+ReDoc at `/redoc`); no separate OpenAPI library. `operationId`s are the handler names
+(`list_signals`, `create_signal`) so generated clients read cleanly. `make openapi` dumps the spec to `backend/openapi.json`
 (introspection only, no db/server), which the Module 2 Next.js frontend codegens a typed
 client from. Keep raw SQL via psycopg, no ORM. The explicit SQL is the studyable artifact
 (partition pruning, ON CONFLICT, index usage stay visible), and it matches the dbmate

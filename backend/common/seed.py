@@ -2,11 +2,16 @@
 three months so partition pruning has something to prune.
 
 Two distinct things get seeded, on purpose:
-  * The real Defrag watchlist (name + Instagram handle). These are the rows the scraper
-    fills with actual posts. Re-adding a handle is a no-op (ON CONFLICT on the handle).
+  * The Defrag watchlist (name + Instagram handle), read from the scrape-signals skill's
+    watchlist.json so there's one source of truth. These are the rows the scraper fills with
+    real posts. Re-adding a handle is a no-op (ON CONFLICT on the handle).
   * Synthetic signal volume, so the EXPLAIN drills mean something before any scraping. A
     handful of real posts per creator wouldn't move a query plan; 4000 rows across three
     partitions will. These are generic filler, not real content.
+
+This is the one-shot convenience so `make db-init && make drills` works. The skill does the
+same watchlist load through the API (POST /influencers/bulk) when Claude Code drives it live.
+Both read the same watchlist.json, so they can't drift.
 
 Every insert is idempotent on the locked unique key, so running this twice inserts nothing
 the second time. That one line of SQL is the idempotency contract and the answer to most
@@ -17,35 +22,42 @@ Run:  uv run python -m common.seed
 import json
 import random
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import psycopg
 
 from common.db import DATABASE_URL
 from common.hashing import content_hash
 
-# The Defrag influencer watchlist: (display name, instagram handle). Handles verified against
-# the creator profiles in package-defrag/research/bots/ (all five are verified IG accounts).
-# Edit here or POST /influencers to adjust.
-WATCHLIST = [
-    ("Lewis Menelaws", "lewismenelaws"),
-    ("Nick Saraev", "nick_saraev"),
-    ("Angus Sewell McCann", "angus.sewell"),
-    ("Rourke", "rourke"),
-    ("RPN", "rpn"),
-]
+# Single source of truth for who we track: the skill's watchlist.json. Fallback keeps the
+# backend runnable if the skill dir isn't present (e.g. a backend-only checkout).
+_WATCHLIST_JSON = (
+    Path(__file__).resolve().parents[2]
+    / ".claude" / "skills" / "scrape-signals" / "watchlist.json"
+)
+_FALLBACK = [{"name": "Example Creator", "instagram_handle": "example_creator"}]
+
+
+def load_watchlist() -> list[dict]:
+    if _WATCHLIST_JSON.exists():
+        return json.loads(_WATCHLIST_JSON.read_text())
+    return _FALLBACK
+
+
 # deterministic so re-seeding produces the same content_hash set (true idempotency)
 random.seed(42)
 
 
 def main() -> None:
+    watchlist = load_watchlist()
     with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
         ids = []
-        for name, handle in WATCHLIST:
+        for row in watchlist:
             cur.execute(
                 "INSERT INTO influencers (name, instagram_handle) VALUES (%s, %s) "
                 "ON CONFLICT (instagram_handle) DO UPDATE SET name = EXCLUDED.name "
                 "RETURNING id",
-                (name, handle),
+                (row["name"], row["instagram_handle"].lstrip("@").lower()),
             )
             ids.append(cur.fetchone()[0])
 

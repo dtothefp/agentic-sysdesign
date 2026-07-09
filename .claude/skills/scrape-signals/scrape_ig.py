@@ -12,6 +12,10 @@ caption, posted_at), NOT volatile metrics or expiring CDN urls. The API derives 
 from that payload, so re-scraping the same post is an ON CONFLICT no-op. Engagement-over-time
 (likes/comments changing) would be a separate observations table, a good follow-up.
 
+This is the scrape-signals skill's repeatable path, run by Claude Code (not a Make target).
+It talks to the running API over HTTP the same way any client would: GET /influencers to learn
+who to scrape, POST /signals for each post, PATCH /influencers/{id} to advance the watermark.
+
 Apify: the REST run-sync-get-dataset-items endpoint runs the actor and returns its dataset
 in one blocking call, no MCP, no SDK. APIFY_API_KEY is read from the environment or backend/.env.
 
@@ -34,8 +38,8 @@ APIFY_ACTOR = "apify~instagram-scraper"  # ~ is the REST form of the apify/insta
 
 
 def load_apify_key() -> str:
-    """Env first, then backend/.env (walking up from this file), so `make scrape` and a bare
-    env var both work. Never hard-code the key."""
+    """Env first, then backend/.env (walking up from this file), so a bare env var and the
+    checked-in .env both work. Never hard-code the key."""
     key = os.environ.get("APIFY_API_KEY")
     if key:
         return key

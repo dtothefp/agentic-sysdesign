@@ -93,6 +93,56 @@
         }
       }
     },
+    "/influencers/bulk": {
+      "post": {
+        "tags": [
+          "influencers"
+        ],
+        "summary": "Create Influencers",
+        "description": "Seed the whole watchlist in one call. Same idempotent upsert as the single POST, run\nonce per row inside a single transaction. This is how the scrape-signals skill loads the\nwatchlist before scraping (POST the list, then GET it back for ids).",
+        "operationId": "create_influencers",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "$ref": "#/components/schemas/InfluencerIn"
+                },
+                "type": "array",
+                "title": "Infs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Influencer"
+                  },
+                  "type": "array",
+                  "title": "Response Create Influencers"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/influencers/{influencer_id}": {
       "patch": {
         "tags": [
