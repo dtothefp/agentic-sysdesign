@@ -515,6 +515,86 @@ why `finalize_run` refreshes it after every run, with the Celery-beat task
 (`refresh_rollup_task`, every 5 minutes) as a backstop for signals that arrive outside a
 run.
 
+### Why it's called a "rollup"
+
+Industry term from the OLAP/analytics world, not something this project invented. When you
+aggregate fine-grained rows up a hierarchy (events into hours, hours into days, days into
+months), each summary level "rolls up" the level below it. SQL even has it as a keyword,
+`GROUP BY ROLLUP (...)`, which computes subtotals at every level in one query. Data teams
+say "the daily rollup" the way frontend teams say "the bundle". So `daily_signal_rollup`
+reads as "the table where per-signal rows get summarized per day", and here 264 raw
+signals roll up into a handful of `(influencer, day, count)` rows.
+
+### Watch the cache be wrong (the staleness experiment)
+
+Run this in `psql` while paused in the debugger at `finalize_run`, just BEFORE stepping
+over the `refresh_rollup(conn)` line, then again just AFTER:
+
+```sql
+SELECT * FROM daily_signal_rollup ORDER BY day DESC LIMIT 10;
+SELECT count(*) FROM raw_signals;
+```
+
+Observed live on a real run (run 4, the 4th demo run of the day, 5 signals per influencer
+per run):
+
+```
+                 raw_signals (the truth)        daily_signal_rollup (the cache)
+                 ────────────────────────       ────────────────────────────────
+before refresh   264 rows. run 4's 25 new       "15 per influencer today"
+                 signals ALREADY in there        computed after run 3, FROZEN
+
+     ...step over refresh_rollup(conn, concurrently=True)...
+
+after refresh    264 rows, unchanged.           "20 per influencer today"
+                 the raw table never lied        recomputed, agrees again
+```
+
+`count(*)` is identical both times because the raw table can't go stale, rows are rows.
+But the matview said 15 while the truth was 20. The gap between those two queries IS
+staleness, and the one line between them is what closes it. In this lab a GROUP BY over
+264 rows is free; in production `raw_signals` is millions of rows and the dashboard reads
+daily counts on every page load, so you flip the expensive work to write time (once per
+run, a moment you control) and every read becomes an index lookup.
+
+### Two names, two refresh paths
+
+`common/signals.py` has `refresh_rollup`, a plain function that executes
+`REFRESH MATERIALIZED VIEW CONCURRENTLY daily_signal_rollup`. `worker/tasks.py` also has
+`refresh_rollup_task`, a Celery task that just calls that function. They exist for two
+different callers.
+
+```
+who pushes onto the queue          what they push
+─────────────────────────          ──────────────
+API (POST /runs)                   5x scrape_influencer (+ chord callback as data)
+the LAST worker to finish          finalize_run
+celery-beat (a clock process)      refresh_rollup_task, every 5 min
+```
+
+`finalize_run` calls the plain FUNCTION directly, in-process. It's already inside a worker
+with a database connection open, so queueing a task from inside a task just to run one SQL
+statement would be a pointless round trip through Redis. The TASK wrapper exists solely so
+celery-beat, which can only speak "enqueue a task by name on a schedule", has something to
+schedule (`beat_schedule` in `worker/celery_app.py`). Beat is a separate little process
+(`make worker-beat`), cron for Celery. If you set a breakpoint in `refresh_rollup_task`
+and never hit it, that's why. Nobody enqueues it unless beat is running. The backstop
+exists because runs aren't the only door into `raw_signals` (the scrape-signals skill
+POSTs to `/signals` directly, and those inserts never pass through `finalize_run`), so
+beat guarantees the dashboard is never more than ~5 minutes stale no matter which door
+the data came in. And since any process that imports the celery app can be a producer,
+a "refresh now" button in the API would just be `refresh_rollup_task.delay()`.
+
+### Why CONCURRENTLY, and why autocommit
+
+A plain `REFRESH` takes an exclusive lock while rebuilding, so every dashboard read blocks
+until it finishes. `CONCURRENTLY` builds the new copy off to the side and swaps it in, and
+readers never wait. Postgres only allows that if the matview has a UNIQUE index (ours is
+on `(influencer_id, day)`, built in Module 1 for exactly this moment; the unique key is
+how Postgres diffs old copy against new during the swap). `CONCURRENTLY` also refuses to
+run inside a transaction block, which is why `finalize_run` opens its connection with
+`autocommit=True`.
+
 ## Running it
 
 Three dev-container terminals, all from `backend/`:
@@ -574,3 +654,7 @@ A good first walk, in breakpoint order:
   stores nothing."
 - "Redis is disposable here by design. Lose it and I lose in-flight queue messages and the
   live animation, never the data. Postgres is the system of record."
+- "Dashboard aggregates come from a materialized view refreshed at write time. The fan-in
+  callback refreshes it the moment a run completes, a periodic beat task is the staleness
+  backstop, and REFRESH CONCURRENTLY over a unique index means readers never block during
+  the rebuild."
