@@ -6,7 +6,7 @@ One repo for the whole system-design build guide, a scaled-down influencer-intel
 pipeline (Defrag's creator watchlist) built up in modules. Personal interview-prep learning
 code, internal, never client-facing.
 
-The five modules are cumulative layers of a single app, not separate apps, so they live
+The modules are cumulative layers of a single app, not separate apps, so they live
 in one repo that accumulates. Each finished module gets a git tag (`module-1`,
 `module-2`, ...) so any milestone is one `git checkout` away.
 
@@ -27,12 +27,35 @@ in one repo that accumulates. Each finished module gets a git tag (`module-1`,
   `backend/worker/` (`celery_app.py`, `tasks.py`, `scrape.py`); run it with `make worker`.
   Full first-principles walkthrough (Redis's two hats, chord = distributed Promise.all,
   snapshot-then-deltas SSE, debugging with `--pool solo`) in [docs/module-2.md](docs/module-2.md).
-- **Module 3, AWS-native.** Deploy for real (routed through the app-setup agent, which
-  owns the deploy wiring).
-- **Module 4, pgvector.** Semantic search over signals (the `embeddings` table is already
-  in the schema, waiting).
-- **Module 5, LLM + graph.** Summarize raw signals into `events` and `digests`, build
-  relationships.
+- **Module 3, AI rating layer.** An LLM lands in the write path as a new pipeline stage,
+  not a longer task. Each scrape task already knows which signals it newly inserted
+  (`insert_signal` returns `inserted`), so it enqueues one `rate_signal` Celery job per new
+  row and finishes; ratings drain through the same worker pool with their own retries, and
+  a slow model call never blocks a scrape. The rating is a single structured-output Claude
+  call (relevance to Defrag's AI-research thesis, topics, summary, confidence) written
+  idempotently keyed on the signal's `content_hash`, deduping on the INPUT hash rather than
+  the model's answer because the model is non-deterministic. A semantic cache (pgvector
+  nearest-neighbor over embedded captions) serves the prior rating when cosine similarity
+  clears a threshold, skipping the model entirely. A beat sweep for unrated signals is the
+  backstop, same pattern as the matview refresh. The AWS rebuild that used to be Module 3
+  was cut to a read-only talk track (parent package, `notes/aws-talk-track.md`); the
+  concepts were already built here in Celery and the vocabulary mapping is readable.
+- **Module 4, deploy.** Railway for the API + worker + Redis (next to the existing shared
+  AI service), Postgres moves to Supabase with pgvector enabled. One piece moves to a
+  Supabase Edge Function on pg_cron (the beat backstop is the natural candidate) to learn
+  the serverless constraints (stateless, wall-clock limits, chunked work re-entered via a
+  durable run row) on a platform we'll actually reuse. Long unreliable work stays on the
+  queue-backed worker; short scheduled work goes serverless. That split is the lesson.
+- **Module 5, Managed Agent capstone.** A scheduled Anthropic Managed Agent (the digest
+  bot) runs the daily sweep, pulls the week's rated signals through the deployed API (the
+  sandbox reaches Railway over HTTP; start with bash + the OpenAPI spec, graduate to an MCP
+  wrapper), clusters themes, compares against last week via a Memory Store mounted at
+  `/mnt/memory/`, and writes `digests` rows. Pipeline for volume, agent for judgment; the
+  per-signal ratings from Module 3 are what the agent reasons over, and the API is its tool
+  surface. Requires Module 4 first (the sandbox can't reach localhost).
+- **Module 6, hybrid search (stretch).** pgvector HNSW + Postgres full-text + Reciprocal
+  Rank Fusion over signal content. Upgrades the API's search and becomes a retrieval tool
+  the digest agent can call.
 
 ## Layout
 
