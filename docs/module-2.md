@@ -312,15 +312,24 @@ worker child finishes scrape_influencer(...)
   │
   ├─ store my return value            ──▶ Redis /1  (celery-task-meta-<uuid>)
   ├─ this message had a "chord" field, so:
-  │     INCR the chord counter        ──▶ Redis /1  (chord-unlock-abc123)
+  │     append my result to the chord scoreboard
+  │                                   ──▶ Redis /1  (celery-taskset-meta-<group_id>.s,
+  │                                        a sorted set of the results so far)
   │
-  └─ did MY increment make it hit 5?
+  └─ did MY append bring the scoreboard to 5?
         no  → done, go BRPOP the next task
-        yes → I'm the closer. Fetch all 5 stored results,
-              build the finalize_run message, LPUSH it   ──▶ Redis /0
+        yes → I'm the closer. The 5 results are already sitting in the
+              scoreboard; build the finalize_run message, LPUSH it  ──▶ Redis /0
+              then delete the scoreboard key.
               (finalize_run then runs like any other task,
                in whichever worker pops it)
 ```
+
+A tidy detail: the scoreboard and the collected results are the same structure. Each
+task appends its own return value, so "the counter" is just the set's size, and the
+moment it reaches 5 the callback's input list is already assembled. The callback's
+task_id was stamped into every header message at enqueue time, which is part of why it
+fires exactly once no matter which worker closes.
 
 Four workers answer "no" and walk away; the fifth enqueues the callback. Nobody watches,
 nobody subscribes. The check happens inline at the moment each task completes, and the
@@ -424,9 +433,11 @@ T2: mid-run (4 popped and executing, 1 still queued, 2 finished)
     "celery": [ msg(scrape bob) ]                       ← last one still waiting
   }
   db 1: {
-    "chord-unlock-abc123": 2,                           ← the scoreboard. Created by the
-                                                          FIRST finishing task's INCR,
-                                                          bumped by each one after
+    "celery-taskset-meta-<group_id>.s":                 ← the chord scoreboard, a sorted
+        [ {result of nick}, {result of jane} ],           set. Created by the FIRST
+                                                          finishing task, appended to by
+                                                          each one after. Size = the count.
+                                                          Deleted once the callback fires.
     "celery-task-meta-<uuid1>": {result of nick},       ← each finished task's return
     "celery-task-meta-<uuid2>": {result of jane}          value, serialized
   }
@@ -443,9 +454,9 @@ T3: after finalize_run
   (the Postgres runs row reads completed, done_count=5. That's the durable record.)
 ```
 
-Who reads those keys? The `chord-unlock` counter is how the workers collectively notice
-the barrier is down. Whichever worker child finishes the 5th task sees the counter hit 5,
-collects the five `celery-task-meta` return values into a list, and enqueues
+Who reads those keys? The taskset scoreboard is how the workers collectively notice the
+barrier is down. Whichever worker child finishes the 5th task sees its own append bring
+the set to 5, takes the five results already accumulated there, and enqueues
 `finalize_run(results, run_id)` as a new message on the job list, where a worker picks it
 up like any other task. So the fan-in hands off worker to worker, through Redis. The API
 never reads any of this; it fired and forgot at POST time, and it learns outcomes the
