@@ -1,7 +1,8 @@
 # sysdesign
 
-A system-design build guide, built as one real app: a scaled-down competitor-intelligence
-pipeline that grows module by module. Each module is one interview competency, and building
+A system-design build guide, built as one real app: a scaled-down influencer-intelligence
+pipeline (Defrag's creator watchlist) that grows module by module. Each module is one
+interview competency, and building
 it is the prep. This is throwaway learning code, not a product. The point is to have run
 it, broken it, and read the query plans, so a backend round has nothing in it you haven't
 already touched with your hands.
@@ -65,8 +66,55 @@ RANGE partitioned by `captured_at`, the partition key inside every unique constr
 durable `runs` job-of-record table that Module 2 writes to on state transitions while
 pushing high-frequency progress to a Redis cache). `20260708000002_monthly_partitions.sql`
 adds the monthly child partitions and an idempotent `create_month_partition(date)`
-maintenance function (the production answer is `pg_partman`). These files are the single
-source of truth for the schema shape.
+maintenance function (the production answer is `pg_partman`).
+`20260708000003_influencer_signals_schema.sql` reframes the domain from generic competitors
+to Defrag's influencer watchlist: it renames `competitors` to `influencers`, renames
+`competitor_id` to `influencer_id` everywhere (one ALTER cascades across all raw_signals
+partitions), adds `instagram_handle` and the `last_scraped_at` scrape watermark, and rebuilds
+the rollup matview. All renames, no data dropped, so you can read exactly what moved.
+`20260708000004_older_partitions.sql` backfills partition coverage for Jan through Apr 2026
+(the initial partitions start at 2026-05-01), so real posts from earlier in the year have a
+child partition to land in. These files are the single source of truth for the schema shape.
+
+A full write-up of Module 1 (what's in it, why each choice, and a phased test walkthrough
+covering the migrations, the API, the scrape skill, and the EXPLAIN drills) lives in
+[`docs/module-1.md`](docs/module-1.md).
+
+## API
+
+A thin FastAPI surface over the schema lives in `backend/api/`. Run it from `backend/`:
+
+```bash
+make api    # uvicorn at http://localhost:8000, interactive docs at /docs
+```
+
+Endpoints: `/influencers` (`POST` a single creator or `POST /influencers/bulk` for the whole
+watchlist, both upsert on `instagram_handle`), `/sources`, `/signals`, `/rollup`. Two things
+it's built to show. `POST /signals` is the idempotent `ON CONFLICT DO NOTHING` upsert with
+`content_hash` derived server-side, so re-POSTing the identical signal is a no-op. `GET /signals`
+requires a `from`/`to` window, so every read carries the partition key and prunes to the
+relevant month(s) instead of fanning across all partitions. `PATCH /influencers/{id}` advances
+the `last_scraped_at` watermark the incremental scraper reads.
+
+To fill the database with real (not synthetic) data, use the in-repo `scrape-signals` skill
+(`.claude/skills/scrape-signals/`), which is how Claude Code drives the database. It's a loop
+entirely over the API: `POST /influencers/bulk` to seed the watchlist, `GET /influencers` to
+read them back, scrape each one's recent Instagram posts (Apify REST, all in parallel,
+incremental off each watermark), then `POST /signals` for each post. Every write takes the same
+idempotent path the app uses. Needs `APIFY_API_KEY` in `backend/.env` (gitignored). There's no
+`make scrape`; the scrape is a skill Claude Code runs, not a build target.
+
+### OpenAPI
+
+FastAPI generates the OpenAPI spec automatically from the Pydantic models and route
+signatures. No extra library. While `make api` is running, the spec is machine-readable at
+`/openapi.json`, with Swagger UI at `/docs` and ReDoc at `/redoc`. `operationId`s are the
+handler names (`list_signals`, `create_signal`) so a generated client reads cleanly.
+
+`make openapi` writes the spec to `backend/openapi.json` without a running db or server (it
+only introspects the routes). That file is the codegen input for the Module 2 Next.js
+frontend, which points a typed-client generator (openapi-typescript / orval) at it to get a
+fully typed API client. Regenerate it whenever the API surface changes.
 
 ## Drills
 
@@ -88,12 +136,18 @@ once and is only useful as a smoke test.
 
   ```bash
   cd backend
-  make db-init   # schema + partitions + seed, no `docker compose up` (db is already a sibling here)
+  make db-init   # schema + partitions + full seed, no `docker compose up` (db is a sibling here)
   make drills
   ```
 
   Use `db-init` inside the container, not `make setup`. `setup` tries to `docker compose up`
   a db, which is the host workflow; inside the container the db is already running.
+
+  `db-init` runs the *full* seed (the watchlist plus 4000 synthetic signals, so the drills have
+  volume). If you just want a clean database with only the influencers and none of the synthetic
+  rows, run `make db-fresh` instead: it drops the db, re-applies every migration from empty, and
+  seeds only the watchlist. Stop `make api` first, since an open connection blocks the drop.
+  `make seed-influencers` seeds just the watchlist without touching the schema.
 - `.cursor/environment.json`. The config Cursor Cloud Agents read to boot their own
   environment. Installs `uv` and the Postgres client, syncs deps in `backend/`, and brings
   up the db. Cloud agents run in a Docker container on a VM. If docker-in-docker is not

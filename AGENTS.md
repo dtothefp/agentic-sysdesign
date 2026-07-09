@@ -2,9 +2,9 @@
 
 > `CLAUDE.md` and `GEMINI.md` are symlinks to this file.
 
-One repo for the whole system-design build guide, a scaled-down competitor-intelligence
-pipeline built up in modules. Personal interview-prep learning code, internal, never
-client-facing.
+One repo for the whole system-design build guide, a scaled-down influencer-intelligence
+pipeline (Defrag's creator watchlist) built up in modules. Personal interview-prep learning
+code, internal, never client-facing.
 
 The five modules are cumulative layers of a single app, not separate apps, so they live
 in one repo that accumulates. Each finished module gets a git tag (`module-1`,
@@ -47,17 +47,43 @@ All from `backend/`:
 
 ```bash
 cd backend
-make setup       # HOST: docker compose up db, then migrate + seed
-make db-init     # DEV CONTAINER: migrate + seed, no `docker compose up` (db is a sibling)
+make setup       # HOST: docker compose up db, then migrate + full seed
+make db-init     # DEV CONTAINER: migrate + full seed (influencers + 4000 drill signals)
+make db-fresh    # DEV CONTAINER: drop db, re-migrate from empty, seed ONLY influencers (no signals)
+make db-empty    # DEV CONTAINER: drop db, re-migrate from empty, seed NOTHING (skill adds influencers via API)
 make migrate     # apply pending dbmate migrations (db/migrations/*.sql)
 make status      # which migrations have run vs pending
 make rollback    # undo the most recent migration (its migrate:down)
 make new name=X  # scaffold the next timestamped migration
+make seed        # full seed: watchlist + 4000 synthetic signals (drill volume)
+make seed-influencers  # just the watchlist, no signals
 make drills      # run drills/explain-drills.sql (whole file, smoke test)
+make api         # run the FastAPI surface (uvicorn, reload) at :8000, docs at /docs
+make openapi     # export the OpenAPI spec to backend/openapi.json (no db/server needed)
 make down        # drop the volume
 make reset       # down then setup
 uv run python -m common.seed   # re-seed (idempotent, inserts nothing the second time)
 ```
+
+The FastAPI app lives in `backend/api/` (`api.main:app`). Endpoints: `/influencers` (POST a
+single creator, POST `/influencers/bulk` for the whole watchlist, both upsert on
+instagram_handle; PATCH advances the last_scraped_at watermark), `/sources`, `/signals` (POST
+is the idempotent `ON CONFLICT` upsert, content_hash derived server-side; GET requires a
+`from`/`to` window so it always prunes), and `/rollup` (reads the matview). To populate real
+data, use the in-repo `scrape-signals` skill (`.claude/skills/scrape-signals/`), which is how
+Claude Code drives the database. It's a loop over the API: POST the watchlist, GET it back,
+scrape each creator's recent IG posts (Apify REST, in parallel, incremental off each
+watermark), then POST each post to `/signals`. There's no `make scrape`; it's a skill Claude
+Code runs, not a build target. Needs `APIFY_API_KEY` in `backend/.env` (gitignored, never commit it).
+
+FastAPI generates the OpenAPI spec automatically (`/openapi.json`, Swagger at `/docs`,
+ReDoc at `/redoc`); no separate OpenAPI library. `operationId`s are the handler names
+(`list_signals`, `create_signal`) so generated clients read cleanly. `make openapi` dumps the spec to `backend/openapi.json`
+(introspection only, no db/server), which the Module 2 Next.js frontend codegens a typed
+client from. Keep raw SQL via psycopg, no ORM. The explicit SQL is the studyable artifact
+(partition pruning, ON CONFLICT, index usage stay visible), and it matches the dbmate
+raw-SQL migration choice. A later tag revisits the data-access layer with SQLAlchemy as a
+deliberate before/after (same endpoints, ORM instead of raw SQL); Module 1 stays raw SQL.
 
 To study a single query plan, don't use `make drills` (it fires the whole file at once).
 Open an interactive shell with `psql "$DATABASE_URL"` and paste one drill block at a time.
@@ -83,7 +109,7 @@ block too, so rollback works.
 ## The one idempotency sentence
 
 At-least-once delivery is assumed everywhere. Every write is an idempotent upsert keyed
-on `(competitor_id, content_hash, captured_at)` via `INSERT ... ON CONFLICT DO NOTHING`,
+on `(influencer_id, content_hash, captured_at)` via `INSERT ... ON CONFLICT DO NOTHING`,
 so reprocessing the same item twice is a no-op. That answers most "what if it runs
 twice" and "how do you avoid duplicates" probes.
 

@@ -6,7 +6,7 @@ export DATABASE_URL
 # truth, so there's no generated schema file to keep in sync.
 DBMATE = dbmate --no-dump-schema --migrations-dir db/migrations --url "$(DATABASE_URL)?sslmode=disable"
 
-.PHONY: up migrate rollback status new seed db-init drills setup down reset
+.PHONY: up migrate rollback status new seed seed-influencers db-init db-fresh db-empty drills setup down reset api openapi
 
 up:
 	docker compose up -d db
@@ -31,18 +31,51 @@ status:
 new:
 	$(DBMATE) new $(name)
 
+# full seed: the watchlist AND 4000 synthetic signals, so the EXPLAIN drills have volume.
 seed:
 	uv run python -m common.seed
 	psql "$(DATABASE_URL)" -c "REFRESH MATERIALIZED VIEW daily_signal_rollup;"
 
-# migrate + seed against whatever DATABASE_URL points at, WITHOUT starting a container.
-# Use this inside the dev container, where Postgres is already running as a sibling (db:5432).
-# On the host, prefer `make setup`.
+# seed ONLY the watchlist influencers (from the skill's watchlist.json). No signal volume.
+seed-influencers:
+	uv run python -m common.seed --influencers-only
+
+# migrate + full seed (influencers + drill volume) against whatever DATABASE_URL points at,
+# WITHOUT starting a container. Use inside the dev container (Postgres is a sibling at db:5432).
+# On the host, prefer `make setup`. Use `make db-fresh` if you want a clean db with just the
+# influencers and none of the synthetic signals.
 db-init: migrate seed
 	@echo "db initialized at $(DATABASE_URL)"
 
+# DEV CONTAINER clean slate: drop the whole db, re-apply every migration from empty, then seed
+# ONLY the influencers (no synthetic signals, no leftover rows). This is the "new database, just
+# the watchlist" path. Stop `make api` first, since an open connection blocks DROP DATABASE.
+db-fresh:
+	$(DBMATE) drop || true
+	$(DBMATE) up
+	uv run python -m common.seed --influencers-only
+	@echo "fresh db at $(DATABASE_URL): migrations applied, influencers seeded, no signals. run 'make seed' later if you want drill volume."
+
+# DEV CONTAINER truly empty: drop the db and re-apply every migration, but seed NOTHING. Use
+# this when you want the scrape-signals skill to add the influencers through the API instead of
+# the Python seed. Stop `make api` first (an open connection blocks DROP DATABASE).
+db-empty:
+	$(DBMATE) drop || true
+	$(DBMATE) up
+	@echo "empty db at $(DATABASE_URL): migrations applied, no rows. add influencers via the scrape-signals skill."
+
 drills:
 	psql "$(DATABASE_URL)" -f drills/explain-drills.sql
+
+# run the FastAPI surface with reload. docs at http://localhost:8000/docs
+api:
+	uv run uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+
+# export the OpenAPI spec to a file the Module 2 frontend codegens a typed client from.
+# app.openapi() only introspects the routes, so this needs no running db or server.
+openapi:
+	uv run python -c "import json; from api.main import app; print(json.dumps(app.openapi(), indent=2))" > openapi.json
+	@echo "wrote backend/openapi.json"
 
 # host one-shot: bring the db up (publishes 5432) then migrate + seed.
 setup: up db-init
