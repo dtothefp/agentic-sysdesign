@@ -87,6 +87,36 @@ fine. This is the RANGE partition contract doing exactly its job. A row only ins
 partition covers its `captured_at`. Migration 4 provisions the earlier-2026 months so
 this-year posts have coverage; pre-2026 pins stay uncovered on purpose.
 
+## The mental model that unifies all of it (pages)
+
+Hold this while running the drills. A table isn't a spreadsheet. On disk it's a pile of
+fixed-size 8KB blocks called pages, with rows packed into them. Postgres never reads "a row"
+off disk. It reads the whole page the row lives in, into memory, then picks the row out. The
+page, not the row, is the atom, and the honest cost of any query is how many pages it had to
+haul from disk into memory.
+
+![how Postgres really stores a table](pages-disk-memory.svg)
+
+Once you see it that way, everything in Module 1 collapses into one idea.
+
+- A **partition** is "don't even look at pages for months you didn't ask about."
+- An **index** is a small separate structure that tells you exactly which pages hold your
+  rows, so you skip the rest.
+- A **materialized view** is "I already computed this answer and stored it as a few pages,
+  so read those instead of aggregating millions."
+- The **BUFFERS** number in the EXPLAIN drills is Postgres telling you, out loud, how many
+  8KB pages it moved.
+
+When you run the drills, don't read the plans as "is it fast." Read them as "how many pages
+did it move, and did my index or partition make that number smaller." Same question, every
+time.
+
+Why the page count is the cost that matters. Reading from RAM is on the order of 100
+nanoseconds. Reading from an SSD is more like 100 microseconds, roughly a thousand times
+slower. So there's a small fast place (memory) and a big slow place (disk), and every
+performance question in this module reduces to "how do I answer the query while dragging as
+little as possible across that gap."
+
 ## How to test
 
 Run everything from `backend/` inside the dev container, where Postgres is a sibling at
