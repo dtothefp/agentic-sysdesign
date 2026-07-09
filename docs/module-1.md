@@ -117,6 +117,25 @@ slower. So there's a small fast place (memory) and a big slow place (disk), and 
 performance question in this module reduces to "how do I answer the query while dragging as
 little as possible across that gap."
 
+## The latency ladder (why the gap is the whole game)
+
+Same idea, one level up. Storage isn't fast or slow, it's a ladder of rungs, each ~1000x
+slower than the one above. Scaled so one CPU-cache tick is one second:
+
+![latency ladder at human scale](latency-ladder.svg)
+
+That single picture is systems engineering. Every pattern you get asked about is a scheme to
+stay on the top rungs.
+
+- **Caching** keeps hot stuff on a higher rung.
+- **Indexing** spends a little space to skip most of the low-rung reads.
+- **CDN** moves the disk closer so the rung is shorter.
+- **Batching** carries more per trip when you must go down the ladder.
+- **Replication** puts copies on many machines' rungs so no single slow rung blocks everyone.
+
+There's no sixth idea everyone else learned in school. It's this ladder, plus "what if the
+machine dies mid-write," which is what idempotency and write-ahead logs answer.
+
 ## How to test
 
 Run everything from `backend/` inside the dev container, where Postgres is a sibling at

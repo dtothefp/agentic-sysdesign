@@ -1,0 +1,38 @@
+<svg viewBox="0 0 700 450" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="lt ld">
+  <title id="lt">Storage latency ladder at human scale</title>
+  <desc id="ld">If one CPU-cache access took one second, RAM would take two minutes, an SSD read one day, a disk seek or datacenter hop four months, and an internet round trip three years.</desc>
+
+  <!-- theme-neutral colors so this renders on both GitHub light and dark backgrounds -->
+  <text x="20" y="30" font-size="18" font-weight="600" fill="#8b949e" font-family="system-ui, sans-serif">if one CPU-cache tick took one second</text>
+  <text x="20" y="54" font-size="14" fill="#8b949e" font-family="system-ui, sans-serif">the same ladder, stretched to human scale (bars are log scale)</text>
+
+  <g fill="#1f6feb" fill-opacity="0.75">
+    <rect x="180" y="110" width="40"  height="26" rx="4"/>
+    <rect x="180" y="172" width="130" height="26" rx="4"/>
+    <rect x="180" y="234" width="265" height="26" rx="4"/>
+    <rect x="180" y="296" width="355" height="26" rx="4"/>
+    <rect x="180" y="358" width="400" height="26" rx="4"/>
+  </g>
+
+  <text x="20" y="121" font-size="13" font-weight="600" fill="#8b949e" font-family="system-ui, sans-serif">CPU cache</text>
+  <text x="20" y="135" font-size="11" fill="#8b949e" font-family="system-ui, sans-serif">~1 nanosecond</text>
+  <text x="228" y="127" font-size="13" fill="#8b949e" font-family="system-ui, sans-serif">1 second</text>
+
+  <text x="20" y="183" font-size="13" font-weight="600" fill="#8b949e" font-family="system-ui, sans-serif">RAM</text>
+  <text x="20" y="197" font-size="11" fill="#8b949e" font-family="system-ui, sans-serif">~100 nanoseconds</text>
+  <text x="318" y="189" font-size="13" fill="#8b949e" font-family="system-ui, sans-serif">2 minutes</text>
+
+  <text x="20" y="245" font-size="13" font-weight="600" fill="#8b949e" font-family="system-ui, sans-serif">SSD read</text>
+  <text x="20" y="259" font-size="11" fill="#8b949e" font-family="system-ui, sans-serif">~100 microseconds</text>
+  <text x="453" y="251" font-size="13" fill="#8b949e" font-family="system-ui, sans-serif">1 day</text>
+
+  <text x="20" y="307" font-size="13" font-weight="600" fill="#8b949e" font-family="system-ui, sans-serif">disk seek / datacenter hop</text>
+  <text x="20" y="321" font-size="11" fill="#8b949e" font-family="system-ui, sans-serif">~10 milliseconds</text>
+  <text x="543" y="313" font-size="13" fill="#8b949e" font-family="system-ui, sans-serif">4 months</text>
+
+  <text x="20" y="369" font-size="13" font-weight="600" fill="#8b949e" font-family="system-ui, sans-serif">internet round trip</text>
+  <text x="20" y="383" font-size="11" fill="#8b949e" font-family="system-ui, sans-serif">~100 milliseconds</text>
+  <text x="588" y="375" font-size="13" fill="#8b949e" font-family="system-ui, sans-serif">3 years</text>
+
+  <text x="20" y="425" font-size="14" fill="#8b949e" font-family="system-ui, sans-serif">every system design pattern is a scheme to stay on the top rungs</text>
+</svg>
