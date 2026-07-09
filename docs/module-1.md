@@ -111,6 +111,11 @@ When you run the drills, don't read the plans as "is it fast." Read them as "how
 did it move, and did my index or partition make that number smaller." Same question, every
 time.
 
+For the physical layer under this (what a bit actually is on RAM vs disk, why disk has an
+"order" and RAM doesn't, why pages exist at all, how bitmap scans exploit disk order, and
+how the B-tree index itself persists on disk and loads into memory), see
+[how-storage-really-works.md](how-storage-really-works.md).
+
 Why the page count is the cost that matters. Reading from RAM is on the order of 100
 nanoseconds. Reading from an SSD is more like 100 microseconds, roughly a thousand times
 slower. So there's a small fast place (memory) and a big slow place (disk), and every
