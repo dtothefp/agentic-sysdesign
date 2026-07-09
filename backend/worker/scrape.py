@@ -49,8 +49,14 @@ def _apify_run(key: str, actor_input: dict) -> list[dict]:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=300) as r:
-        return json.load(r)
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        # Apify puts the actual reason (e.g. which input field failed validation) in the
+        # response body; without this, all the run's error field shows is "400 Bad Request".
+        detail = e.read().decode(errors="replace")[:300]
+        raise RuntimeError(f"Apify {e.code}: {detail}") from None
 
 
 def scrape_influencer_live(conn: psycopg.Connection, inf: dict, run_ts: str, limit: int) -> int:
@@ -65,9 +71,10 @@ def scrape_influencer_live(conn: psycopg.Connection, inf: dict, run_ts: str, lim
         "resultsLimit": 1 if watermark is None else limit,
     }
     if watermark is not None:
-        actor_input["onlyPostsNewerThan"] = (
-            watermark.isoformat() if isinstance(watermark, datetime) else str(watermark)
-        )
+        # Apify validates this field against a regex that only accepts ISO timestamps
+        # ending in Z, not +00:00, which is what Python's isoformat() emits for UTC.
+        wm = watermark if isinstance(watermark, datetime) else datetime.fromisoformat(str(watermark))
+        actor_input["onlyPostsNewerThan"] = wm.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     posts = _apify_run(load_apify_key(), actor_input)
 
