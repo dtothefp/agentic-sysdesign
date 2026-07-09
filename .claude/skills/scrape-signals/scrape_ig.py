@@ -66,18 +66,27 @@ def apify_run(key: str, actor_input: dict) -> list[dict]:
     return http_json(url, method="POST", body=actor_input)
 
 
-def scrape_one(api: str, key: str, inf: dict, run_ts: str, limit: int) -> str:
-    """Scrape one influencer end to end: fetch, post each signal, advance the watermark."""
+def scrape_one(api: str, key: str, inf: dict, run_ts: str, limit: int,
+               backfill: bool = False) -> str:
+    """Scrape one influencer end to end: fetch, post each signal, advance the watermark.
+
+    Two modes. Normal (incremental) looks forward off the watermark. Backfill looks backward:
+    it pulls the last `limit` posts regardless of the watermark, to fill older partitions, and
+    deliberately does NOT touch the watermark (backfill is orthogonal to the forward cursor)."""
     handle = inf["instagram_handle"]
     watermark = inf.get("last_scraped_at")
     actor_input = {
         "directUrls": [f"https://www.instagram.com/{handle}/"],
         "resultsType": "posts",
-        # first run: just the most recent post. incremental run: up to `limit` newer posts.
-        "resultsLimit": 1 if watermark is None else limit,
     }
-    if watermark is not None:
-        actor_input["onlyPostsNewerThan"] = watermark
+    if backfill:
+        # look backward: the last `limit` posts, watermark ignored.
+        actor_input["resultsLimit"] = limit
+    else:
+        # first run: just the most recent post. incremental run: up to `limit` newer posts.
+        actor_input["resultsLimit"] = 1 if watermark is None else limit
+        if watermark is not None:
+            actor_input["onlyPostsNewerThan"] = watermark
 
     try:
         posts = apify_run(key, actor_input)
@@ -116,15 +125,22 @@ def scrape_one(api: str, key: str, inf: dict, run_ts: str, limit: int) -> str:
             if e.code != 400:
                 return f"  {handle:16} SIGNAL ERROR {e.code}: {e.read().decode()[:120]}"
 
-    # advance the watermark to the run start, so the next run only pulls newer posts.
-    try:
-        http_json(f"{api}/influencers/{inf['id']}", method="PATCH",
-                  body={"last_scraped_at": run_ts}, timeout=30)
-    except urllib.error.HTTPError as e:
-        return f"  {handle:16} WATERMARK ERROR {e.code}"
+    # advance the watermark to the run start, so the next run only pulls newer posts. Backfill
+    # skips this: it's filling the past, not moving the forward cursor.
+    if not backfill:
+        try:
+            http_json(f"{api}/influencers/{inf['id']}", method="PATCH",
+                      body={"last_scraped_at": run_ts}, timeout=30)
+        except urllib.error.HTTPError as e:
+            return f"  {handle:16} WATERMARK ERROR {e.code}"
 
-    first = " (first run: newest only)" if watermark is None else ""
-    return f"  {handle:16} posts:{len(posts):3}  inserted:{inserted:3}  already-had:{duped:3}  skipped:{skipped:3}{first}"
+    if backfill:
+        mode = " (backfill: last N, no partition = skipped)"
+    elif watermark is None:
+        mode = " (first run: newest only)"
+    else:
+        mode = ""
+    return f"  {handle:16} posts:{len(posts):3}  inserted:{inserted:3}  already-had:{duped:3}  skipped:{skipped:3}{mode}"
 
 
 def main() -> None:
@@ -132,6 +148,9 @@ def main() -> None:
     ap.add_argument("--api", default="http://localhost:8000")
     ap.add_argument("--handle", help="scrape only this handle (default: every influencer)")
     ap.add_argument("--limit", type=int, default=50, help="max posts per incremental run")
+    ap.add_argument("--backfill", action="store_true",
+                    help="pull the last --limit posts per influencer regardless of the watermark, "
+                         "to fill older partitions. Does not advance the watermark.")
     ap.add_argument("--workers", type=int, default=6)
     args = ap.parse_args()
 
@@ -144,10 +163,11 @@ def main() -> None:
 
     # one run timestamp for the whole batch; each influencer's watermark advances to it.
     run_ts = datetime.now(timezone.utc).isoformat()
-    print(f"scraping {len(influencers)} influencer(s) in parallel...")
+    mode = f"backfill last {args.limit}" if args.backfill else "incremental"
+    print(f"scraping {len(influencers)} influencer(s) in parallel ({mode})...")
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = [pool.submit(scrape_one, args.api, key, inf, run_ts, args.limit)
+        futures = [pool.submit(scrape_one, args.api, key, inf, run_ts, args.limit, args.backfill)
                    for inf in influencers]
         for f in as_completed(futures):
             print(f.result())

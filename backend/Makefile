@@ -6,7 +6,7 @@ export DATABASE_URL
 # truth, so there's no generated schema file to keep in sync.
 DBMATE = dbmate --no-dump-schema --migrations-dir db/migrations --url "$(DATABASE_URL)?sslmode=disable"
 
-.PHONY: up migrate rollback status new seed seed-influencers db-init db-fresh drills setup down reset api openapi
+.PHONY: up migrate rollback status new seed seed-influencers db-init db-fresh db-empty drills setup down reset api openapi
 
 up:
 	docker compose up -d db
@@ -55,6 +55,14 @@ db-fresh:
 	$(DBMATE) up
 	uv run python -m common.seed --influencers-only
 	@echo "fresh db at $(DATABASE_URL): migrations applied, influencers seeded, no signals. run 'make seed' later if you want drill volume."
+
+# DEV CONTAINER truly empty: drop the db and re-apply every migration, but seed NOTHING. Use
+# this when you want the scrape-signals skill to add the influencers through the API instead of
+# the Python seed. Stop `make api` first (an open connection blocks DROP DATABASE).
+db-empty:
+	$(DBMATE) drop || true
+	$(DBMATE) up
+	@echo "empty db at $(DATABASE_URL): migrations applied, no rows. add influencers via the scrape-signals skill."
 
 drills:
 	psql "$(DATABASE_URL)" -f drills/explain-drills.sql

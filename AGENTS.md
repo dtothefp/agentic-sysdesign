@@ -50,6 +50,7 @@ cd backend
 make setup       # HOST: docker compose up db, then migrate + full seed
 make db-init     # DEV CONTAINER: migrate + full seed (influencers + 4000 drill signals)
 make db-fresh    # DEV CONTAINER: drop db, re-migrate from empty, seed ONLY influencers (no signals)
+make db-empty    # DEV CONTAINER: drop db, re-migrate from empty, seed NOTHING (skill adds influencers via API)
 make migrate     # apply pending dbmate migrations (db/migrations/*.sql)
 make status      # which migrations have run vs pending
 make rollback    # undo the most recent migration (its migrate:down)

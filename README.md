@@ -71,8 +71,14 @@ maintenance function (the production answer is `pg_partman`).
 to Defrag's influencer watchlist: it renames `competitors` to `influencers`, renames
 `competitor_id` to `influencer_id` everywhere (one ALTER cascades across all raw_signals
 partitions), adds `instagram_handle` and the `last_scraped_at` scrape watermark, and rebuilds
-the rollup matview. All renames, no data dropped, so you can read exactly what moved. These
-files are the single source of truth for the schema shape.
+the rollup matview. All renames, no data dropped, so you can read exactly what moved.
+`20260708000004_older_partitions.sql` backfills partition coverage for Jan through Apr 2026
+(the initial partitions start at 2026-05-01), so real posts from earlier in the year have a
+child partition to land in. These files are the single source of truth for the schema shape.
+
+A full write-up of Module 1 (what's in it, why each choice, and a phased test walkthrough
+covering the migrations, the API, the scrape skill, and the EXPLAIN drills) lives in
+[`docs/module-1.md`](docs/module-1.md).
 
 ## API
 
