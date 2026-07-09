@@ -25,6 +25,19 @@ services:
       timeout: 3s
       retries: 10
 
+  # Module 2 broker + result backend for Celery, and the pub/sub bus the SSE progress
+  # stream reads from. redis:7-alpine matches the ExtractIQ dev container. No persistence
+  # (no --appendonly): a job's durable state lives in the `runs` table in Postgres, Redis
+  # only carries live progress deltas, so losing it on restart costs nothing.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   workspace:
     build:
       context: .
@@ -37,8 +50,17 @@ services:
       # keep uv's venv OUTSIDE the bind mount. the host's /workspace/.venv is a macOS
       # venv and would shadow a Linux one if uv used the default ./.venv location.
       UV_PROJECT_ENVIRONMENT: /home/vscode/.venv
+      # Celery + the SSE stream. One Redis: /0 is the broker (task queue), /1 the result
+      # backend (task returns). Progress pub/sub uses bare REDIS_URL because PUBLISH/SUBSCRIBE
+      # in Redis are server-wide, not scoped to a logical db, so the worker publishes and the
+      # SSE endpoint subscribes on the same instance regardless of db number.
+      REDIS_URL: redis://redis:6379
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
 volumes:

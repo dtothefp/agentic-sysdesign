@@ -1,7 +1,7 @@
 """Request and response shapes for the API. Pydantic validates every payload at the edge,
 so handlers only ever see well-formed data."""
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -64,3 +64,30 @@ class DailyRollup(BaseModel):
     day: datetime
     signal_count: int
     source_count: int
+
+
+# --- Module 2: fan-out runs ----------------------------------------------------
+
+class RunTrigger(BaseModel):
+    # live = real Apify scrape; demo = synthetic signals, no Apify spend (watch the SSE bar)
+    mode: Literal["live", "demo"] = "live"
+    limit: int = 5  # posts (live) or synthetic signals (demo) per influencer
+
+
+class RunCreated(BaseModel):
+    run_id: int
+    total: int  # how many influencers this run fanned out to
+    mode: str
+
+
+class Run(BaseModel):
+    id: int
+    status: str  # queued | running | completed | failed
+    mode: str
+    total: int
+    done_count: int
+    inserted: int
+    error: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None

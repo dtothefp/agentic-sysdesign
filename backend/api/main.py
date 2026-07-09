@@ -16,6 +16,9 @@ is the incremental-scrape watermark, advanced via PATCH after each run.
 Handlers are sync `def`, so FastAPI runs them in a threadpool and the sync psycopg pool
 never blocks the event loop. One pool, opened at startup, closed at shutdown.
 """
+import asyncio
+import json
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -23,14 +26,18 @@ import psycopg
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.routing import APIRoute
 from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
+from redis import asyncio as aioredis
+from sse_starlette.sse import EventSourceResponse
 
 from api.models import (
     DailyRollup,
     Influencer,
     InfluencerIn,
     InfluencerWatermark,
+    Run,
+    RunCreated,
+    RunTrigger,
     Signal,
     SignalIn,
     SignalInsertResult,
@@ -38,7 +45,10 @@ from api.models import (
     SourceIn,
 )
 from common.db import DATABASE_URL
-from common.hashing import content_hash
+from common.signals import insert_signal
+from worker.tasks import start_run
+
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
 
 pool = ConnectionPool(DATABASE_URL, min_size=1, max_size=10, open=False)
 
@@ -63,6 +73,7 @@ TAGS = [
     {"name": "sources", "description": "Where an influencer's signals come from."},
     {"name": "signals", "description": "The partitioned raw_signals firehose."},
     {"name": "rollup", "description": "Precomputed daily counts (materialized view)."},
+    {"name": "runs", "description": "Background fan-out scrape jobs + live SSE progress."},
 ]
 
 app = FastAPI(
@@ -190,17 +201,14 @@ def create_source(s: SourceIn):
 
 @app.post("/signals", response_model=SignalInsertResult, tags=["signals"])
 def create_signal(sig: SignalIn):
-    """Idempotent write. content_hash is derived here, so identical payloads dedupe no
-    matter who sends them. Returns inserted=False when the exact signal already existed."""
-    h = content_hash(sig.payload)
+    """Idempotent write. content_hash is derived server-side, so identical payloads dedupe no
+    matter who sends them. Returns inserted=False when the exact signal already existed. The
+    actual upsert is common.signals.insert_signal, the same function the Celery worker calls,
+    so there's literally one write path."""
     with pool.connection() as conn:
         try:
-            cur = conn.execute(
-                "INSERT INTO raw_signals "
-                "(influencer_id, source_id, captured_at, content_hash, payload) "
-                "VALUES (%s, %s, %s, %s, %s) "
-                "ON CONFLICT (influencer_id, content_hash, captured_at) DO NOTHING",
-                (sig.influencer_id, sig.source_id, sig.captured_at, h, Jsonb(sig.payload)),
+            inserted, h = insert_signal(
+                conn, sig.influencer_id, sig.captured_at, sig.payload, sig.source_id
             )
         except psycopg.errors.ForeignKeyViolation:
             raise HTTPException(400, f"influencer_id {sig.influencer_id} does not exist")
@@ -208,7 +216,7 @@ def create_signal(sig: SignalIn):
             # no partition covers captured_at. Provision the month (create_month_partition)
             # or pick a captured_at inside an existing partition.
             raise HTTPException(400, f"no partition for captured_at {sig.captured_at}: {e}")
-    return SignalInsertResult(inserted=cur.rowcount == 1, content_hash=h)
+    return SignalInsertResult(inserted=inserted, content_hash=h)
 
 
 @app.get("/signals", response_model=list[Signal], tags=["signals"])
@@ -250,3 +258,97 @@ def rollup(influencer_id: int | None = None):
     sql += " ORDER BY day DESC"
     with pool.connection() as conn:
         return conn.cursor(row_factory=dict_row).execute(sql, params).fetchall()
+
+
+# --- runs (Module 2: fan-out jobs + live SSE progress) -------------------------
+
+_RUN_COLS = (
+    "id, status, mode, total, done_count, inserted, error, "
+    "created_at, started_at, finished_at"
+)
+
+
+def _read_run(run_id: int) -> dict | None:
+    """One indexed PK lookup for a run's authoritative state. Used for the GET snapshot and,
+    via asyncio.to_thread, for the SSE stream's on-connect snapshot."""
+    with pool.connection() as conn:
+        return (
+            conn.cursor(row_factory=dict_row)
+            .execute(f"SELECT {_RUN_COLS} FROM runs WHERE id = %s", (run_id,))
+            .fetchone()
+        )
+
+
+@app.post("/runs", response_model=RunCreated, tags=["runs"])
+def create_run(trigger: RunTrigger):
+    """Kick off a fan-out scrape. Creates the runs row, enqueues one Celery task per
+    influencer plus a fan-in callback that refreshes the rollup, and returns the run_id.
+    Returns immediately (202-style): the work happens in the worker, watch it on the stream."""
+    return RunCreated(**start_run(mode=trigger.mode, limit=trigger.limit))
+
+
+@app.get("/runs", response_model=list[Run], tags=["runs"])
+def list_runs(limit: int = Query(20, le=100)):
+    """Recent runs, newest first. The dashboard's run history."""
+    with pool.connection() as conn:
+        return (
+            conn.cursor(row_factory=dict_row)
+            .execute(f"SELECT {_RUN_COLS} FROM runs ORDER BY created_at DESC LIMIT %s", (limit,))
+            .fetchall()
+        )
+
+
+@app.get("/runs/{run_id}", response_model=Run, tags=["runs"])
+def get_run(run_id: int):
+    """A run's current state, straight from Postgres (the durable record). This is the
+    snapshot a client can read at any time, no stream needed."""
+    row = _read_run(run_id)
+    if row is None:
+        raise HTTPException(404, f"run {run_id} not found")
+    return row
+
+
+@app.get("/runs/{run_id}/stream", tags=["runs"])
+async def stream_run(run_id: int):
+    """Server-Sent Events: live progress for one run.
+
+    The refresh-proof pattern, in order:
+      1. subscribe to the Redis channel FIRST, so no delta published during step 2 is lost.
+      2. read the runs row from Postgres and send it as the `snapshot` event. A client that
+         connects late, or reconnects after a page refresh, gets the true current state here.
+      3. if the run is already finished, send `done` and close (nothing more will publish).
+      4. otherwise stream each Redis delta as a `progress` event until `done`.
+
+    A refresh just reopens this endpoint. There's no per-user registration to lose: the run_id
+    in the URL is the whole subscription, and the snapshot re-establishes state every time.
+    """
+    channel = f"run:{run_id}"
+
+    async def gen():
+        r = aioredis.from_url(REDIS_URL)
+        pubsub = r.pubsub()
+        await pubsub.subscribe(channel)  # (1) subscribe before snapshot: no gap
+        try:
+            snapshot = await asyncio.to_thread(_read_run, run_id)  # (2) durable state
+            if snapshot is None:
+                yield {"event": "error", "data": json.dumps({"error": f"run {run_id} not found"})}
+                return
+            snap_json = Run(**snapshot).model_dump_json()
+            yield {"event": "snapshot", "data": snap_json}
+            if snapshot["status"] in ("completed", "failed"):
+                yield {"event": "done", "data": snap_json}  # (3) already terminal
+                return
+            async for msg in pubsub.listen():  # (4) live deltas
+                if msg["type"] != "message":
+                    continue
+                text = msg["data"].decode() if isinstance(msg["data"], bytes) else msg["data"]
+                is_done = json.loads(text).get("type") == "done"
+                yield {"event": "done" if is_done else "progress", "data": text}
+                if is_done:
+                    return
+        finally:
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
+            await r.aclose()
+
+    return EventSourceResponse(gen())
