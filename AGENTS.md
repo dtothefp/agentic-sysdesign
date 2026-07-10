@@ -48,9 +48,19 @@ in one repo that accumulates. Each finished module gets a git tag (`module-1`,
   the model's answer because the model is non-deterministic. A semantic cache (pgvector
   nearest-neighbor over embedded captions) serves the prior rating when cosine similarity
   clears a threshold, skipping the model entirely. A beat sweep for unrated signals is the
-  backstop, same pattern as the matview refresh. The AWS rebuild that once held this module
-  number was cut to a read-only talk track (parent package, `notes/aws-talk-track.md`); the
-  concepts were already built here in Celery and the vocabulary mapping is readable.
+  backstop, same pattern as the matview refresh. The model call goes through one
+  provider-agnostic adapter speaking the OpenAI-compatible chat completions shape (a wire
+  format every serving stack clones, the way S3's API got cloned by R2 and MinIO), so local
+  dev rates through Ollama in the devcontainer (free, offline, structured output enforced
+  via a JSON schema) and prod rents a hosted model (Haiku, DeepSeek, a Groq free-tier
+  Llama). Which model rates a run is data, not deployment config. `POST /runs` takes an
+  optional `model`, the run row carries it, and the rating tasks read it; env vars hold only
+  the default and the credentials, secrets never ride in request bodies. The design rule,
+  **own the interface, rent the model**. Self-host where compute is free (your laptop), rent
+  where compute is metered (the cloud), and make the code indifferent to which one it's
+  talking to. The AWS rebuild that once held this module number was cut to a read-only talk
+  track (parent package, `notes/aws-talk-track.md`); the concepts were already built here in
+  Celery and the vocabulary mapping is readable.
 - **Module 5, Managed Agent capstone.** A scheduled Anthropic Managed Agent (the digest
   bot) runs the daily sweep, pulls the week's rated signals through the deployed API (the
   sandbox reaches Railway over HTTP; start with bash + the OpenAPI spec, graduate to an MCP
@@ -61,6 +71,29 @@ in one repo that accumulates. Each finished module gets a git tag (`module-1`,
 - **Module 6, hybrid search (stretch).** pgvector HNSW + Postgres full-text + Reciprocal
   Rank Fusion over signal content. Upgrades the API's search and becomes a retrieval tool
   the digest agent can call.
+
+## Appendix modules
+
+Parked experiments, worth one afternoon each, never on the critical path.
+
+- **Appendix A, self-host the rating model on Railway.** Ollama as a fourth Railway
+  service, CPU-only, a 3B quantized model, pointed at by the same rating adapter Module 4
+  builds (no code changes, that's the point). The lesson is feeling the wrong economics
+  firsthand. Railway has no GPUs, inference is memory-bandwidth bound, so CPU streams maybe
+  5-15 tokens/sec while the ~5GB of always-on RAM bills more per month than the API pennies
+  it replaces. Stand it up, measure tokens/sec and the RAM line on the bill, write the
+  numbers down, tear it down.
+
+## The custom-vs-hosted line
+
+The thread running through modules 3 to 5 is deciding what to run custom and what to rent
+hosted, and being able to move a workload across that line without rewriting it. The rating
+model swaps between self-hosted Ollama and rented APIs behind one interface (Module 4).
+Scheduled work splits between the queue-backed worker we own and serverless we rent (Module
+3's deferred Edge Function). The digest bot rents an entire agent runtime (Module 5's
+Managed Agent) in the same season Cursor ships hosted background agents; soon every vendor
+will have one. The durable skill isn't picking a side, it's keeping the interface yours so
+the answer can change per workload as the hosted offerings evolve.
 
 ## Layout
 
