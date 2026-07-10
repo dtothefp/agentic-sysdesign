@@ -46,6 +46,11 @@ MANIFEST = {
         "REDIS_URL": ("literal", REDIS_BASE),
         "CELERY_BROKER_URL": ("literal", REDIS_BASE + "/0"),
         "CELERY_RESULT_BACKEND": ("literal", REDIS_BASE + "/1"),
+        # Module 4: the API validates a run's model at the door (resolve_model checks the
+        # provider key exists), so the keys live on BOTH services. RATING_MODEL doesn't:
+        # it's the worker's default, the API never reads it.
+        "GROQ_API_KEY": ("env", "GROQ_API_KEY"),
+        "ANTHROPIC_API_KEY": ("env", "ANTHROPIC_API_KEY"),
     },
     "worker": {
         "DATABASE_URL": ("env", "DATABASE_URL_SUPABASE"),
@@ -53,13 +58,14 @@ MANIFEST = {
         "CELERY_BROKER_URL": ("literal", REDIS_BASE + "/0"),
         "CELERY_RESULT_BACKEND": ("literal", REDIS_BASE + "/1"),
         "APIFY_API_KEY": ("env", "APIFY_API_KEY"),
-        # Module 4 rating stage. The code is deployed but INERT until these are set: with
-        # no RATING_MODEL and no per-run model, scrape tasks enqueue no rate_signal jobs
-        # and the beat sweep returns "disabled". Uncomment (and add the key to
-        # backend/.env) once a hosted-provider account exists. RATING_MODEL is
-        # "provider/model", e.g. "deepseek/deepseek-chat" or "groq/llama-3.1-8b-instant".
-        # "RATING_MODEL": ("literal", "deepseek/deepseek-chat"),
-        # "DEEPSEEK_API_KEY": ("env", "DEEPSEEK_API_KEY"),
+        # Module 4 rating stage, LIVE as of 2026-07-10. Default is Groq's free tier
+        # (rate-limited, plenty for this pipeline); Anthropic is the per-run quality
+        # override, POST /runs {"model": "anthropic/claude-haiku-4-5"}. Keys come from
+        # backend/.env (GROQ reused from the parent root .env, ANTHROPIC from
+        # package-defrag). Unset RATING_MODEL here and re-sync to make rating inert again.
+        "RATING_MODEL": ("literal", "groq/llama-3.1-8b-instant"),
+        "GROQ_API_KEY": ("env", "GROQ_API_KEY"),
+        "ANTHROPIC_API_KEY": ("env", "ANTHROPIC_API_KEY"),
     },
     # redis's own REDIS_PASSWORD is deliberately NOT managed here. It was generated
     # once at provision time; rotating it is a deliberate act, not a sync side effect.
