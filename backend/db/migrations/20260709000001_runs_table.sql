@@ -13,6 +13,12 @@
 -- partitioning here, unlike raw_signals.
 
 -- migrate:up
+-- Migration 1 (the Module 1 big-bang) created an earlier, simpler `runs` table. This is the
+-- Module 2 redefinition with the fan-out accounting columns, so drop the stale one first, the
+-- same drop-then-recreate migration 3 uses for daily_signal_rollup. Without this, a from-empty
+-- `dbmate up` collides on the duplicate table (fine on the dev container, which was migrated
+-- incrementally, but every fresh deploy hits it).
+DROP TABLE IF EXISTS runs;
 CREATE TABLE runs (
     id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     -- queued  -> row created, tasks enqueued, nothing done yet
