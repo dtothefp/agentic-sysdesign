@@ -9,8 +9,11 @@ demo: synthetic signals with a small sleep between each, so you can watch the fa
       SSE progress bar move without spending Apify credits. Same idempotent write path, so it
       exercises the real insert and the real runs-table accounting.
 
-Both return how many signals they actually inserted (ON CONFLICT misses excluded), which the
-task adds to the run's running total.
+Both return (inserted_count, new_items) where new_items is one {content_hash, caption} per
+signal this call actually inserted (ON CONFLICT misses excluded). The count feeds the run's
+running total; the items are what the task enqueues rate_signal jobs for, because "which
+rows are new" is knowledge only the writer has at write time (Module 4's rating layer keys
+off exactly this).
 """
 import json
 import os
@@ -59,7 +62,9 @@ def _apify_run(key: str, actor_input: dict) -> list[dict]:
         raise RuntimeError(f"Apify {e.code}: {detail}") from None
 
 
-def scrape_influencer_live(conn: psycopg.Connection, inf: dict, run_ts: str, limit: int) -> int:
+def scrape_influencer_live(
+    conn: psycopg.Connection, inf: dict, run_ts: str, limit: int
+) -> tuple[int, list[dict]]:
     """Fetch this influencer's recent posts and upsert each as a signal. Incremental off the
     watermark (first run: newest post only; later runs: posts newer than last_scraped_at),
     then advance the watermark to the run start."""
@@ -79,6 +84,7 @@ def scrape_influencer_live(conn: psycopg.Connection, inf: dict, run_ts: str, lim
     posts = _apify_run(load_apify_key(), actor_input)
 
     inserted = 0
+    new_items: list[dict] = []
     for p in posts:
         ts = p.get("timestamp")
         if not ts:
@@ -93,8 +99,10 @@ def scrape_influencer_live(conn: psycopg.Connection, inf: dict, run_ts: str, lim
             "posted_at": ts,
         }
         try:
-            did, _ = insert_signal(conn, inf["id"], ts, payload)
-            inserted += 1 if did else 0
+            did, h = insert_signal(conn, inf["id"], ts, payload)
+            if did:
+                inserted += 1
+                new_items.append({"content_hash": h, "caption": payload["caption"]})
         except psycopg.errors.CheckViolation:
             # no partition covers this post's month; skip it (same rule the API enforces)
             conn.rollback()
@@ -105,16 +113,19 @@ def scrape_influencer_live(conn: psycopg.Connection, inf: dict, run_ts: str, lim
         "UPDATE influencers SET last_scraped_at = %s WHERE id = %s", (run_ts, inf["id"])
     )
     conn.commit()
-    return inserted
+    return inserted, new_items
 
 
-def scrape_influencer_demo(conn: psycopg.Connection, inf: dict, run_ts: str, limit: int) -> int:
+def scrape_influencer_demo(
+    conn: psycopg.Connection, inf: dict, run_ts: str, limit: int
+) -> tuple[int, list[dict]]:
     """Insert `limit` synthetic signals for this influencer, one every ~0.4s so the progress
     stream visibly ticks. No Apify call. Each payload is distinct (carries an index) so the
     content_hash differs and the ON CONFLICT upsert actually inserts rather than deduping."""
     handle = inf["instagram_handle"]
     now = datetime.now(timezone.utc)
     inserted = 0
+    new_items: list[dict] = []
     for i in range(limit):
         time.sleep(0.4)
         captured_at = now - timedelta(minutes=i)  # spread within the current-month partition
@@ -126,10 +137,12 @@ def scrape_influencer_demo(conn: psycopg.Connection, inf: dict, run_ts: str, lim
             "posted_at": captured_at.isoformat(),
         }
         try:
-            did, _ = insert_signal(conn, inf["id"], captured_at, payload)
-            inserted += 1 if did else 0
+            did, h = insert_signal(conn, inf["id"], captured_at, payload)
+            if did:
+                inserted += 1
+                new_items.append({"content_hash": h, "caption": payload["caption"]})
             conn.commit()
         except psycopg.errors.CheckViolation:
             conn.rollback()  # no partition for the current month; nothing to insert
             break
-    return inserted
+    return inserted, new_items

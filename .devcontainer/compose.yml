@@ -38,6 +38,17 @@ services:
       timeout: 3s
       retries: 5
 
+  # Module 4's local rating model. Ollama serves an OpenAI-compatible /v1/chat/completions,
+  # which is the whole point: the rating adapter talks the same wire shape here as it does
+  # to DeepSeek or Groq in prod (own the interface, rent the model). CPU inference in a VM
+  # is slow (a handful of tokens/sec), fine for rating one caption at a time. The model
+  # itself isn't baked into the image; pull it once with `make ollama-pull` (persists in
+  # the ollama volume across rebuilds).
+  ollama:
+    image: ollama/ollama
+    volumes:
+      - ollama:/root/.ollama
+
   workspace:
     build:
       context: .
@@ -57,6 +68,11 @@ services:
       REDIS_URL: redis://redis:6379
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
+      # Module 4: point the rating adapter's ollama provider at the sibling service, and
+      # default every run to the local model. Prod sets neither (rating stays inert there
+      # until a hosted-provider key lands in the Railway env manifest).
+      OLLAMA_BASE_URL: http://ollama:11434/v1
+      RATING_MODEL: ollama/qwen3:4b
     depends_on:
       db:
         condition: service_healthy
@@ -65,3 +81,4 @@ services:
 
 volumes:
   pgdata:
+  ollama:

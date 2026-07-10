@@ -39,4 +39,10 @@ celery_app.conf.beat_schedule = {
         "task": "worker.tasks.refresh_rollup_task",
         "schedule": crontab(minute="*/5"),
     },
+    # Module 4 backstop: sweep signals that never got a rating (exhausted retries, API-path
+    # inserts). No-ops instantly when RATING_MODEL is unset, so it's safe to schedule always.
+    "sweep-unrated-backstop": {
+        "task": "worker.tasks.sweep_unrated",
+        "schedule": crontab(minute="*/10"),
+    },
 }
