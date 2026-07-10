@@ -67,7 +67,9 @@ in one repo that accumulates. Each finished module gets a git tag (`module-1`,
   compute is metered (the cloud), and make the code indifferent to which one it's talking
   to. The AWS rebuild that once held this module number was cut to a read-only talk track
   (parent package, `notes/aws-talk-track.md`); the concepts were already built here in
-  Celery and the vocabulary mapping is readable.
+  Celery and the vocabulary mapping is readable. The high-level mental model behind all of
+  it (weights, training vs inference, the token loop, memory bandwidth vs compute, CPU vs
+  GPU, quantization) lives in [docs/llm-foundations.md](docs/llm-foundations.md).
 - **Module 5, Managed Agent capstone.** A scheduled Anthropic Managed Agent (the digest
   bot) runs the daily sweep, pulls the week's rated signals through the deployed API (the
   sandbox reaches Railway over HTTP; start with bash + the OpenAPI spec, graduate to an MCP
