@@ -124,7 +124,11 @@ def rate_caption(handle: str, caption: str, model: str, timeout: int = 180) -> d
     if PROVIDERS[provider]["json_mode"]:
         body["response_format"] = {"type": "json_object"}
 
-    headers = {"Content-Type": "application/json"}
+    # The User-Agent matters. urllib's default (Python-urllib/3.x) trips Cloudflare's bot
+    # fingerprinting in front of Groq, which answers 403 "error code: 1010" before the
+    # request ever reaches the API. Same class of gotcha as Railway's GraphQL endpoint
+    # (infra scripts send curl's UA for the same reason). Any honest non-default UA passes.
+    headers = {"Content-Type": "application/json", "User-Agent": "sysdesign-rating/1.0"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
