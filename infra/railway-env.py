@@ -28,7 +28,7 @@ PROJECT_ID = "12dffbd4-65bd-44f7-83b7-d30238c92892"  # sysdesign
 ENVIRONMENT_ID = "530d245e-d3f1-478d-b622-04e9426d7470"  # production
 
 SERVICES = {
-    "api": "f3f27a33-d028-4051-be59-1a3f8dc4e3b3",
+    "api": "96b5d402-727f-4f2a-bce0-5818e2b7973e",
     "worker": "adb815cd-c5dc-4868-80d6-2f64e82b28eb",
     "redis": "3551ca6b-210e-41ce-b49d-e1f4ca0faa9e",
 }
