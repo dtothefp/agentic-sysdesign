@@ -1,0 +1,159 @@
+"""The provider-agnostic rating adapter. One OpenAI-compatible chat completions call, raw.
+
+The design rule this module implements, own the interface, rent the model. Every serving
+stack we care about (Ollama locally, DeepSeek, Groq, OpenRouter, Anthropic's compatibility
+endpoint) answers the same HTTP shape, POST {base_url}/chat/completions with {model,
+messages} returning choices[0].message.content. It's a wire format everyone cloned from
+OpenAI, the way S3's API got cloned by R2 and MinIO, so swapping providers is a base-url
+and model-name change, never a code change.
+
+Deliberately raw urllib, no OpenAI SDK, for the same reason the repo keeps raw SQL over an
+ORM. The wire format is the studyable artifact, and an SDK would hide the one thing this
+module exists to teach. (scrape.py already set the urllib precedent for Apify.)
+
+Model strings are "provider/model", e.g. "ollama/qwen3:4b" or "deepseek/deepseek-chat".
+Selection is data (it rides POST /runs and the runs row); this module owns only resolution,
+the HTTP call, and parsing. If no model is given and RATING_MODEL isn't set in the env, the
+rating pipeline is simply inert, which is what keeps prod safe until a provider key exists.
+
+Structured output, honestly. Providers diverge exactly here: OpenAI-style json_schema
+enforcement isn't universal, so we use the lowest common denominator that actually holds up,
+response_format {"type": "json_object"} where supported, the schema spelled out in the
+system prompt, and strict parse-and-validate on our side. The validator, not the vendor, is
+the contract.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import urllib.error
+import urllib.request
+from typing import Any
+
+# Registry of OpenAI-compatible providers. base_url can be overridden per provider with
+# <PROVIDER>_BASE_URL (the devcontainer sets OLLAMA_BASE_URL=http://ollama:11434/v1).
+# json_mode=False means the provider's compatibility layer doesn't accept response_format,
+# so we rely on the prompt + our validator alone.
+PROVIDERS: dict[str, dict[str, Any]] = {
+    "ollama": {"base_url": "http://localhost:11434/v1", "key_env": None, "json_mode": True},
+    "deepseek": {"base_url": "https://api.deepseek.com/v1", "key_env": "DEEPSEEK_API_KEY", "json_mode": True},
+    "groq": {"base_url": "https://api.groq.com/openai/v1", "key_env": "GROQ_API_KEY", "json_mode": True},
+    "openrouter": {"base_url": "https://openrouter.ai/api/v1", "key_env": "OPENROUTER_API_KEY", "json_mode": True},
+    "anthropic": {"base_url": "https://api.anthropic.com/v1", "key_env": "ANTHROPIC_API_KEY", "json_mode": False},
+}
+
+SYSTEM_PROMPT = (
+    "You rate Instagram posts from AI/tech creators for an AI-research intelligence feed. "
+    "Relevance means: AI tooling, agents, LLM infrastructure, orchestration, developer "
+    "workflows, or the business of building with AI. Respond with ONLY a json object, no "
+    "prose, exactly this shape: "
+    '{"relevance": <float 0-1>, "confidence": <float 0-1>, '
+    '"topics": [<up to 5 short lowercase strings>], "summary": "<one sentence>"}'
+)
+
+
+class RatingError(RuntimeError):
+    """Any failure between us and a parsed, valid rating. Retryable by the caller."""
+
+
+def default_model() -> str | None:
+    """The worker's default model, or None, in which case rating is disabled. Read at call
+    time, not import time, so tests and the env manifest can flip it without reimporting."""
+    return os.environ.get("RATING_MODEL") or None
+
+
+def resolve_model(model: str) -> tuple[str, str, str, str | None]:
+    """'provider/model' -> (provider, model_name, base_url, api_key).
+
+    Raises ValueError on an unknown provider or a missing key, so the API can reject a bad
+    POST /runs with a 400 before any task is enqueued (fail at the door, not in the worker).
+    """
+    provider, sep, model_name = model.partition("/")
+    if not sep or not model_name or provider not in PROVIDERS:
+        raise ValueError(
+            f"model must be 'provider/model' with provider one of {sorted(PROVIDERS)}, got {model!r}"
+        )
+    cfg = PROVIDERS[provider]
+    base_url = os.environ.get(f"{provider.upper()}_BASE_URL", cfg["base_url"]).rstrip("/")
+    api_key = os.environ.get(cfg["key_env"]) if cfg["key_env"] else None
+    if cfg["key_env"] and not api_key:
+        raise ValueError(f"model {model!r} needs {cfg['key_env']} in the environment")
+    return provider, model_name, base_url, api_key
+
+
+def _parse_rating(content: str) -> dict[str, Any]:
+    """Model output -> validated rating dict. Tolerates the two ways small models misbehave
+    (markdown ```json fences, and Qwen-style <think>...</think> preambles), then enforces
+    the schema ourselves: clamp the floats, cap topics at 5, require a summary."""
+    text = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise RatingError(f"model returned non-JSON: {content[:200]!r}") from e
+    try:
+        rating = {
+            "relevance": min(1.0, max(0.0, float(raw["relevance"]))),
+            "confidence": min(1.0, max(0.0, float(raw["confidence"]))),
+            "topics": [str(t)[:64] for t in (raw.get("topics") or [])][:5],
+            "summary": str(raw["summary"]).strip()[:500],
+        }
+    except (KeyError, TypeError, ValueError) as e:
+        raise RatingError(f"model JSON missing/invalid fields: {text[:200]!r}") from e
+    if not rating["summary"]:
+        raise RatingError("model returned an empty summary")
+    return rating
+
+
+def rate_caption(handle: str, caption: str, model: str, timeout: int = 180) -> dict[str, Any]:
+    """One rating: chat completions request out, validated dict back.
+
+    The generous timeout is for the CPU-inference case (local Ollama streams a handful of
+    tokens per second). Hosted GPU providers answer in a second or two.
+    """
+    provider, model_name, base_url, api_key = resolve_model(model)
+    body: dict[str, Any] = {
+        "model": model_name,
+        "temperature": 0,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Creator: @{handle}\nCaption:\n{caption or '(no caption)'}"},
+        ],
+    }
+    if PROVIDERS[provider]["json_mode"]:
+        body["response_format"] = {"type": "json_object"}
+
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    req = urllib.request.Request(
+        f"{base_url}/chat/completions", data=json.dumps(body).encode(), headers=headers, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            resp = json.load(r)
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")[:300]
+        raise RatingError(f"{provider} {e.code}: {detail}") from None
+    except (urllib.error.URLError, TimeoutError) as e:
+        raise RatingError(f"{provider} unreachable at {base_url}: {e}") from None
+
+    try:
+        content = resp["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        raise RatingError(f"unexpected response shape from {provider}: {str(resp)[:200]!r}") from None
+    return _parse_rating(content)
+
+
+def insert_rating(conn, content_hash: str, model: str, rating: dict[str, Any]) -> bool:
+    """Idempotent write, same ON CONFLICT story as insert_signal. First rating for a hash
+    wins; a concurrent duplicate (sweep racing a scrape-enqueued task) is a no-op. Returns
+    whether this call inserted."""
+    cur = conn.execute(
+        "INSERT INTO signal_ratings (content_hash, model, relevance, confidence, topics, summary) "
+        "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (content_hash) DO NOTHING",
+        (content_hash, model, rating["relevance"], rating["confidence"], rating["topics"], rating["summary"]),
+    )
+    return cur.rowcount == 1

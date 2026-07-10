@@ -24,6 +24,7 @@ import redis
 from psycopg.rows import dict_row
 
 from common.db import DATABASE_URL
+from common.rating import RatingError, default_model, insert_rating, rate_caption
 from common.signals import refresh_rollup
 from worker.celery_app import celery_app
 from worker.scrape import scrape_influencer_demo, scrape_influencer_live
@@ -45,12 +46,15 @@ def _publish(run_id: int, message: dict) -> None:
 # --- fan-out unit --------------------------------------------------------------
 
 @celery_app.task(name="worker.tasks.scrape_influencer", bind=True)
-def scrape_influencer(self, run_id: int, inf: dict, run_ts: str, mode: str, limit: int) -> dict:
+def scrape_influencer(
+    self, run_id: int, inf: dict, run_ts: str, mode: str, limit: int, model: str | None = None
+) -> dict:
     """Scrape one influencer, record progress, publish a delta. Never raises: a single
     influencer failing shouldn't sink the whole run or block the chord callback, so errors
     are captured in the return value and still count toward done_count."""
     error: str | None = None
     inserted = 0
+    new_items: list[dict] = []
     with psycopg.connect(DATABASE_URL) as conn:
         # first task to touch the run flips it queued -> running and stamps started_at.
         # COALESCE makes it idempotent under the race of N tasks starting together.
@@ -62,7 +66,7 @@ def scrape_influencer(self, run_id: int, inf: dict, run_ts: str, mode: str, limi
         conn.commit()
         try:
             scrape = scrape_influencer_demo if mode == "demo" else scrape_influencer_live
-            inserted = scrape(conn, inf, run_ts, limit)
+            inserted, new_items = scrape(conn, inf, run_ts, limit)
         except Exception as e:  # noqa: BLE001 (deliberately swallow so the chord still fires)
             error = f"{type(e).__name__}: {e}"
             conn.rollback()
@@ -73,6 +77,15 @@ def scrape_influencer(self, run_id: int, inf: dict, run_ts: str, mode: str, limi
             (inserted, run_id),
         ).fetchone()
         conn.commit()
+
+    # Module 4: the rating stage rides the write path as NEW WORK, not a longer task. One
+    # rate_signal job per newly inserted row, enqueued after this task's own writes are
+    # committed, so a slow model call can never stretch a scrape or delay the chord's fan-in.
+    # No model (none on the run, none in RATING_MODEL) means the rating layer is inert.
+    rating_model = model or default_model()
+    if rating_model:
+        for item in new_items:
+            rate_signal.delay(item["content_hash"], inf["instagram_handle"], item["caption"], rating_model)
 
     done, total, run_inserted = row
     _publish(run_id, {
@@ -124,7 +137,41 @@ def finalize_run(self, results: list[dict], run_id: int) -> dict:
     return {"run_id": run_id, "status": status, **final}
 
 
-# --- periodic backstop ---------------------------------------------------------
+# --- Module 4: the AI rating stage ----------------------------------------------
+
+@celery_app.task(
+    name="worker.tasks.rate_signal",
+    bind=True,
+    autoretry_for=(RatingError,),
+    retry_backoff=True,          # 1s, 2s, 4s... between attempts
+    retry_backoff_max=300,
+    retry_jitter=True,
+    max_retries=3,
+)
+def rate_signal(self, content_hash: str, handle: str, caption: str | None, model: str) -> str:
+    """Rate one signal's content. Idempotent at both ends: skip if a rating for this hash
+    already exists (dedup on the INPUT hash, the model's output is non-deterministic), and
+    the insert is ON CONFLICT DO NOTHING for the race where the beat sweep and a scrape
+    enqueue the same hash. Model failures raise RatingError, which Celery retries with
+    backoff; after max_retries the signal stays unrated and the sweep picks it up later.
+
+    The model call happens with NO database connection open. It can take minutes on CPU
+    inference, and a connection held across it is a pool slot doing nothing."""
+    with psycopg.connect(DATABASE_URL) as conn:
+        if conn.execute(
+            "SELECT 1 FROM signal_ratings WHERE content_hash = %s", (content_hash,)
+        ).fetchone():
+            return "already-rated"
+
+    rating = rate_caption(handle, caption or "", model)
+
+    with psycopg.connect(DATABASE_URL) as conn:
+        did = insert_rating(conn, content_hash, model, rating)
+        conn.commit()
+    return "rated" if did else "lost-race"
+
+
+# --- periodic backstops ----------------------------------------------------------
 
 @celery_app.task(name="worker.tasks.refresh_rollup_task", bind=True)
 def refresh_rollup_task(self) -> str:
@@ -135,19 +182,53 @@ def refresh_rollup_task(self) -> str:
     return "refreshed"
 
 
+@celery_app.task(name="worker.tasks.sweep_unrated", bind=True)
+def sweep_unrated(self, batch: int = 50) -> str:
+    """Celery-beat backstop for ratings, same pattern as the rollup refresh. The scrape path
+    already enqueues a rate_signal per new row; this catches whatever slipped through (a
+    rating that exhausted its retries, signals inserted via the API). Bounded batch per tick
+    so a backlog drains gradually instead of flooding the queue.
+
+    Only real content (source = 'instagram') is swept. The 4000 seeded drill signals and
+    demo-run synthetics are excluded on purpose, a backstop that silently enqueues thousands
+    of model calls against seed data is a bill, not a safety net. Demo-run signals still get
+    rated via the scrape-time enqueue, where it's an explicit choice."""
+    model = default_model()
+    if not model:
+        return "disabled (RATING_MODEL not set)"
+    with psycopg.connect(DATABASE_URL) as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT ON (r.content_hash) r.content_hash, i.instagram_handle, "
+            "       r.payload->>'caption' AS caption "
+            "FROM raw_signals r JOIN influencers i ON i.id = r.influencer_id "
+            "WHERE r.payload->>'source' = 'instagram' "
+            "  AND NOT EXISTS (SELECT 1 FROM signal_ratings sr WHERE sr.content_hash = r.content_hash) "
+            "ORDER BY r.content_hash, r.captured_at DESC LIMIT %s",
+            (batch,),
+        ).fetchall()
+    for content_hash, handle, caption in rows:
+        rate_signal.delay(content_hash, handle, caption, model)
+    return f"enqueued {len(rows)}"
+
+
 # --- trigger (called from the API) ---------------------------------------------
 
-def start_run(mode: str = "live", limit: int = 5) -> dict:
+def start_run(mode: str = "live", limit: int = 5, model: str | None = None) -> dict:
     """Create a runs row and enqueue the fan-out chord. Returns the run_id and how many
-    influencers it fanned out to. Called by POST /runs in the API process."""
+    influencers it fanned out to. Called by POST /runs in the API process.
+
+    model is the data-plane half of the rating design: which model rates this run's new
+    signals rides the request and is stored on the row (so two runs can rate with two models
+    and be diffed). None falls back to the worker's RATING_MODEL default; if that's unset
+    too, the run scrapes without rating."""
     run_ts = datetime.now(timezone.utc).isoformat()
     with psycopg.connect(DATABASE_URL) as conn:
         influencers = conn.cursor(row_factory=dict_row).execute(
             "SELECT id, instagram_handle, last_scraped_at FROM influencers ORDER BY id"
         ).fetchall()
         run_id = conn.execute(
-            "INSERT INTO runs (status, mode, total) VALUES ('queued', %s, %s) RETURNING id",
-            (mode, len(influencers)),
+            "INSERT INTO runs (status, mode, total, model) VALUES ('queued', %s, %s, %s) RETURNING id",
+            (mode, len(influencers), model),
         ).fetchone()[0]
         conn.commit()
 
@@ -166,7 +247,7 @@ def start_run(mode: str = "live", limit: int = 5) -> dict:
     from celery import chord
 
     header = [
-        scrape_influencer.s(run_id, inf, run_ts, mode, limit) for inf in payload_infs
+        scrape_influencer.s(run_id, inf, run_ts, mode, limit, model) for inf in payload_infs
     ]
     chord(header)(finalize_run.s(run_id))
-    return {"run_id": run_id, "total": len(payload_infs), "mode": mode}
+    return {"run_id": run_id, "total": len(payload_infs), "mode": mode, "model": model}

@@ -53,8 +53,13 @@ MANIFEST = {
         "CELERY_BROKER_URL": ("literal", REDIS_BASE + "/0"),
         "CELERY_RESULT_BACKEND": ("literal", REDIS_BASE + "/1"),
         "APIFY_API_KEY": ("env", "APIFY_API_KEY"),
-        # Module 4 rating stage, uncomment when it ships:
-        # "ANTHROPIC_API_KEY": ("env", "ANTHROPIC_API_KEY"),
+        # Module 4 rating stage. The code is deployed but INERT until these are set: with
+        # no RATING_MODEL and no per-run model, scrape tasks enqueue no rate_signal jobs
+        # and the beat sweep returns "disabled". Uncomment (and add the key to
+        # backend/.env) once a hosted-provider account exists. RATING_MODEL is
+        # "provider/model", e.g. "deepseek/deepseek-chat" or "groq/llama-3.1-8b-instant".
+        # "RATING_MODEL": ("literal", "deepseek/deepseek-chat"),
+        # "DEEPSEEK_API_KEY": ("env", "DEEPSEEK_API_KEY"),
     },
     # redis's own REDIS_PASSWORD is deliberately NOT managed here. It was generated
     # once at provision time; rotating it is a deliberate act, not a sync side effect.

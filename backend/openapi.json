@@ -477,7 +477,7 @@
           "runs"
         ],
         "summary": "Create Run",
-        "description": "Kick off a fan-out scrape. Creates the runs row, enqueues one Celery task per\ninfluencer plus a fan-in callback that refreshes the rollup, and returns the run_id.\nReturns immediately (202-style): the work happens in the worker, watch it on the stream.",
+        "description": "Kick off a fan-out scrape. Creates the runs row, enqueues one Celery task per\ninfluencer plus a fan-in callback that refreshes the rollup, and returns the run_id.\nReturns immediately (202-style): the work happens in the worker, watch it on the stream.\n\nAn unknown provider or a missing provider key is rejected HERE with a 400, before any\ntask is enqueued. Fail at the door: a bad model string should never make it into the\nqueue where it would surface as N retry-looping worker tasks instead of one clear error.",
         "operationId": "create_run",
         "requestBody": {
           "required": true,
@@ -643,6 +643,73 @@
           }
         }
       }
+    },
+    "/ratings": {
+      "get": {
+        "tags": [
+          "ratings"
+        ],
+        "summary": "List Ratings",
+        "description": "Recent ratings, newest first. min_relevance filters to what the model considered\non-thesis, which is the view the Module 5 digest agent will eventually read.",
+        "operationId": "list_ratings",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "min_relevance",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 1,
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Relevance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Rating"
+                  },
+                  "title": "Response List Ratings"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -763,6 +830,53 @@
         ],
         "title": "InfluencerWatermark"
       },
+      "Rating": {
+        "properties": {
+          "content_hash": {
+            "type": "string",
+            "title": "Content Hash"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "relevance": {
+            "type": "number",
+            "title": "Relevance"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Topics"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "rated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Rated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content_hash",
+          "model",
+          "relevance",
+          "confidence",
+          "topics",
+          "summary",
+          "rated_at"
+        ],
+        "title": "Rating"
+      },
       "Run": {
         "properties": {
           "id": {
@@ -776,6 +890,17 @@
           "mode": {
             "type": "string",
             "title": "Mode"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
           },
           "total": {
             "type": "integer",
@@ -858,6 +983,17 @@
           "mode": {
             "type": "string",
             "title": "Mode"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
           }
         },
         "type": "object",
@@ -883,6 +1019,17 @@
             "type": "integer",
             "title": "Limit",
             "default": 5
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
           }
         },
         "type": "object",
@@ -1112,6 +1259,10 @@
     {
       "name": "runs",
       "description": "Background fan-out scrape jobs + live SSE progress."
+    },
+    {
+      "name": "ratings",
+      "description": "Per-signal AI ratings, keyed on content_hash."
     }
   ]
 }

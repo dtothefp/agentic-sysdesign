@@ -72,18 +72,24 @@ class RunTrigger(BaseModel):
     # live = real Apify scrape; demo = synthetic signals, no Apify spend (watch the SSE bar)
     mode: Literal["live", "demo"] = "live"
     limit: int = 5  # posts (live) or synthetic signals (demo) per influencer
+    # Module 4: which model rates this run's new signals, as "provider/model" (e.g.
+    # "ollama/qwen3:4b", "deepseek/deepseek-chat"). Model selection is data, not deploy
+    # config; None falls back to the worker's RATING_MODEL default (unset = no rating).
+    model: str | None = None
 
 
 class RunCreated(BaseModel):
     run_id: int
     total: int  # how many influencers this run fanned out to
     mode: str
+    model: str | None = None
 
 
 class Run(BaseModel):
     id: int
     status: str  # queued | running | completed | failed
     mode: str
+    model: str | None = None  # rating model recorded on the run (data plane)
     total: int
     done_count: int
     inserted: int
@@ -91,3 +97,15 @@ class Run(BaseModel):
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+
+
+# --- Module 4: AI ratings -------------------------------------------------------
+
+class Rating(BaseModel):
+    content_hash: str  # joins to raw_signals.content_hash (dedup key = the model's INPUT)
+    model: str
+    relevance: float
+    confidence: float
+    topics: list[str]
+    summary: str
+    rated_at: datetime

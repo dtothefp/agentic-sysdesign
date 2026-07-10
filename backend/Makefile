@@ -6,7 +6,7 @@ export DATABASE_URL
 # truth, so there's no generated schema file to keep in sync.
 DBMATE = dbmate --no-dump-schema --migrations-dir db/migrations --url "$(DATABASE_URL)?sslmode=disable"
 
-.PHONY: up migrate rollback status new seed seed-influencers db-init db-fresh db-empty drills setup down reset api openapi worker worker-beat
+.PHONY: up migrate rollback status new seed seed-influencers db-init db-fresh db-empty drills setup down reset api openapi worker worker-beat ollama-pull
 
 up:
 	docker compose up -d db
@@ -82,6 +82,13 @@ worker:
 # and-suspenders. Run alongside `make worker`.
 worker-beat:
 	uv run celery -A worker.celery_app beat --loglevel INFO
+
+# DEV CONTAINER: pull the Module 4 local rating model into the ollama sibling service.
+# One-time (the model persists in the `ollama` compose volume). Uses Ollama's native
+# /api/pull because the OpenAI-compat layer only covers inference, not model management.
+ollama-pull:
+	curl -sf http://ollama:11434/api/pull -d '{"model": "qwen3:4b"}'
+	@echo "pulled qwen3:4b"
 
 # export the OpenAPI spec to a file the Module 2 frontend codegens a typed client from.
 # app.openapi() only introspects the routes, so this needs no running db or server.

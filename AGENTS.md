@@ -38,28 +38,35 @@ in one repo that accumulates. Each finished module gets a git tag (`module-1`,
   the function lives in (see `packages/package-supabase/`). The lesson stands either way,
   long unreliable work stays on the queue-backed worker, short scheduled work goes
   serverless.
-- **Module 4, AI rating layer.** An LLM lands in the write path as a new pipeline stage,
-  not a longer task. Each scrape task already knows which signals it newly inserted
-  (`insert_signal` returns `inserted`), so it enqueues one `rate_signal` Celery job per new
-  row and finishes; ratings drain through the same worker pool with their own retries, and
-  a slow model call never blocks a scrape. The rating is a single structured-output Claude
-  call (relevance to Defrag's AI-research thesis, topics, summary, confidence) written
-  idempotently keyed on the signal's `content_hash`, deduping on the INPUT hash rather than
-  the model's answer because the model is non-deterministic. A semantic cache (pgvector
-  nearest-neighbor over embedded captions) serves the prior rating when cosine similarity
-  clears a threshold, skipping the model entirely. A beat sweep for unrated signals is the
-  backstop, same pattern as the matview refresh. The model call goes through one
-  provider-agnostic adapter speaking the OpenAI-compatible chat completions shape (a wire
-  format every serving stack clones, the way S3's API got cloned by R2 and MinIO), so local
-  dev rates through Ollama in the devcontainer (free, offline, structured output enforced
-  via a JSON schema) and prod rents a hosted model (Haiku, DeepSeek, a Groq free-tier
-  Llama). Which model rates a run is data, not deployment config. `POST /runs` takes an
-  optional `model`, the run row carries it, and the rating tasks read it; env vars hold only
-  the default and the credentials, secrets never ride in request bodies. The design rule,
-  **own the interface, rent the model**. Self-host where compute is free (your laptop), rent
-  where compute is metered (the cloud), and make the code indifferent to which one it's
-  talking to. The AWS rebuild that once held this module number was cut to a read-only talk
-  track (parent package, `notes/aws-talk-track.md`); the concepts were already built here in
+- **Module 4, AI rating layer (BUILT, semantic cache pending).** An LLM lands in the write
+  path as a new pipeline stage, not a longer task. Each scrape task already knows which
+  signals it newly inserted (`insert_signal` returns `inserted`), so it enqueues one
+  `rate_signal` Celery job per new row and finishes; ratings drain through the same worker
+  pool with their own retries (backoff on `RatingError`), and a slow model call never blocks
+  a scrape. The rating is a single structured-output call (relevance to Defrag's AI-research
+  thesis, topics, summary, confidence) written idempotently to `signal_ratings` keyed on the
+  signal's `content_hash`, deduping on the INPUT hash rather than the model's answer because
+  the model is non-deterministic. A beat sweep for unrated signals is the backstop, same
+  pattern as the matview refresh; it only sweeps `source = 'instagram'` rows, so the 4000
+  seeded drill signals never turn into a surprise model bill. The model call goes through one
+  provider-agnostic adapter, `backend/common/rating.py`, speaking the OpenAI-compatible chat
+  completions shape over raw urllib (a wire format every serving stack clones, the way S3's
+  API got cloned by R2 and MinIO), so local dev rates through Ollama in the devcontainer
+  (free, offline; `make ollama-pull` once, then `RATING_MODEL=ollama/qwen3:4b` is already in
+  the compose env) and prod rents a hosted model (DeepSeek, a Groq free-tier Llama, Haiku).
+  Which model rates a run is data, not deployment config. `POST /runs` takes an optional
+  `model` ("provider/model", validated at the door with a 400 via `resolve_model`), the run
+  row carries it, and the rating tasks read it; env vars hold only the `RATING_MODEL`
+  default and the credentials, secrets never ride in request bodies. With neither set the
+  whole layer is inert, which is prod's state until a provider key lands in
+  `infra/railway-env.py`. Ratings read back over `GET /ratings` (newest first, optional
+  `min_relevance`), which is the surface the Module 5 digest agent will consume. Still to
+  come from the original sketch, the pgvector semantic cache (serve a prior rating when
+  caption embeddings are near-identical, skipping the model). The design rule, **own the
+  interface, rent the model**. Self-host where compute is free (your laptop), rent where
+  compute is metered (the cloud), and make the code indifferent to which one it's talking
+  to. The AWS rebuild that once held this module number was cut to a read-only talk track
+  (parent package, `notes/aws-talk-track.md`); the concepts were already built here in
   Celery and the vocabulary mapping is readable.
 - **Module 5, Managed Agent capstone.** A scheduled Anthropic Managed Agent (the digest
   bot) runs the daily sweep, pulls the week's rated signals through the deployed API (the
@@ -134,7 +141,8 @@ make seed-influencers  # just the watchlist, no signals
 make drills      # run drills/explain-drills.sql (whole file, smoke test)
 make api         # run the FastAPI surface (uvicorn, reload) at :8000, docs at /docs
 make worker      # DEV CONTAINER: Celery worker for Module 2 fan-out jobs (needs Redis + the API)
-make worker-beat # DEV CONTAINER: Celery beat, periodic rollup-refresh backstop (optional, alongside worker)
+make worker-beat # DEV CONTAINER: Celery beat, periodic backstops (rollup refresh + unrated sweep)
+make ollama-pull # DEV CONTAINER: one-time pull of the Module 4 local rating model (qwen3:4b)
 make openapi     # export the OpenAPI spec to backend/openapi.json (no db/server needed)
 make down        # drop the volume
 make reset       # down then setup

@@ -35,6 +35,7 @@ from api.models import (
     Influencer,
     InfluencerIn,
     InfluencerWatermark,
+    Rating,
     Run,
     RunCreated,
     RunTrigger,
@@ -45,6 +46,7 @@ from api.models import (
     SourceIn,
 )
 from common.db import DATABASE_URL
+from common.rating import resolve_model
 from common.signals import insert_signal
 from worker.tasks import start_run
 
@@ -74,6 +76,7 @@ TAGS = [
     {"name": "signals", "description": "The partitioned raw_signals firehose."},
     {"name": "rollup", "description": "Precomputed daily counts (materialized view)."},
     {"name": "runs", "description": "Background fan-out scrape jobs + live SSE progress."},
+    {"name": "ratings", "description": "Per-signal AI ratings, keyed on content_hash."},
 ]
 
 app = FastAPI(
@@ -263,7 +266,7 @@ def rollup(influencer_id: int | None = None):
 # --- runs (Module 2: fan-out jobs + live SSE progress) -------------------------
 
 _RUN_COLS = (
-    "id, status, mode, total, done_count, inserted, error, "
+    "id, status, mode, model, total, done_count, inserted, error, "
     "created_at, started_at, finished_at"
 )
 
@@ -283,8 +286,17 @@ def _read_run(run_id: int) -> dict | None:
 def create_run(trigger: RunTrigger):
     """Kick off a fan-out scrape. Creates the runs row, enqueues one Celery task per
     influencer plus a fan-in callback that refreshes the rollup, and returns the run_id.
-    Returns immediately (202-style): the work happens in the worker, watch it on the stream."""
-    return RunCreated(**start_run(mode=trigger.mode, limit=trigger.limit))
+    Returns immediately (202-style): the work happens in the worker, watch it on the stream.
+
+    An unknown provider or a missing provider key is rejected HERE with a 400, before any
+    task is enqueued. Fail at the door: a bad model string should never make it into the
+    queue where it would surface as N retry-looping worker tasks instead of one clear error."""
+    if trigger.model is not None:
+        try:
+            resolve_model(trigger.model)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    return RunCreated(**start_run(mode=trigger.mode, limit=trigger.limit, model=trigger.model))
 
 
 @app.get("/runs", response_model=list[Run], tags=["runs"])
@@ -352,3 +364,20 @@ async def stream_run(run_id: int):
             await r.aclose()
 
     return EventSourceResponse(gen())
+
+
+# --- ratings (Module 4: the AI rating layer's read surface) ---------------------
+
+@app.get("/ratings", response_model=list[Rating], tags=["ratings"])
+def list_ratings(limit: int = Query(50, le=200), min_relevance: float | None = Query(None, ge=0, le=1)):
+    """Recent ratings, newest first. min_relevance filters to what the model considered
+    on-thesis, which is the view the Module 5 digest agent will eventually read."""
+    sql = "SELECT content_hash, model, relevance, confidence, topics, summary, rated_at FROM signal_ratings"
+    params: list = []
+    if min_relevance is not None:
+        sql += " WHERE relevance >= %s"
+        params.append(min_relevance)
+    sql += " ORDER BY rated_at DESC LIMIT %s"
+    params.append(limit)
+    with pool.connection() as conn:
+        return conn.cursor(row_factory=dict_row).execute(sql, params).fetchall()
