@@ -1,0 +1,23 @@
+# Copy to terraform.tfvars (gitignored) and fill in. Values live in backend/.env.
+# Prefer exporting RAILWAY_TOKEN in the shell over putting railway_token here.
+
+# Account/workspace token from railway.com/account/tokens (NOT the project token).
+# railway_token = "..."
+
+# Only if your token sees more than one workspace. Find it in the Railway dashboard URL.
+# railway_workspace_id = "..."
+
+# Supabase session-pooler string (backend/.env DATABASE_URL_SUPABASE).
+database_url = "postgresql://postgres.<ref>:<password>@aws-0-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require"
+
+# Apify REST token (backend/.env APIFY_API_KEY).
+apify_api_key = "apify_api_..."
+
+# Optional, Module 3 rating stage. Leave unset until Module 3 ships.
+# anthropic_api_key = "sk-ant-..."
+
+# Optional overrides (defaults shown).
+# project_name  = "sysdesign"
+# github_repo   = "dfp-side-hustle/sysdesign"
+# github_branch = "main"
+# api_subdomain = "sysdesign-api"

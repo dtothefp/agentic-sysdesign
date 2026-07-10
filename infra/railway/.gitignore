@@ -1,0 +1,10 @@
+# Never commit state (holds the resolved DATABASE_URL, Apify key, and generated Redis
+# password in plaintext) or the filled tfvars.
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+*.auto.tfvars
+crash.log
+crash.*.log
