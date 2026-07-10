@@ -70,6 +70,13 @@ The api runs migrations before it takes traffic, via the `preDeployCommand` in
 uv run python db/migrate.py
 ```
 
+The command is scoped to the production environment (nested under
+`environments.production` in the config file, Railway's per-environment override
+syntax) so PR preview environments never migrate. Previews share the production
+Supabase database, and a PR branch carrying a new migration must not rewrite the
+shared schema just by deploying a preview. See the preview section below for the
+flip side of that hazard.
+
 Railway runs `preDeployCommand` once, inside the freshly built image, before the new
 version goes live. So a deploy can't serve code that expects a column the database doesn't
 have yet, the schema is caught up first, or the deploy fails and the old version keeps
@@ -99,3 +106,63 @@ in `railway-env.py`. It cannot touch other projects.
 
 Connecting a service to GitHub is the one thing the token cannot do (it's a user-identity
 + GitHub-app grant), so that step happens once in the dashboard.
+
+## PR preview environments (opt-in, label-gated)
+
+Not every PR gets an environment. Add the **`preview`** label to a PR and
+[.github/workflows/preview-env.yml](../.github/workflows/preview-env.yml) creates a Railway
+environment named `pr-<number>` cloned from production, with api + worker pointed at the PR
+branch and a fresh Railway-provided domain on the api (commented on the PR). Remove the
+label, or close/merge the PR, and the environment is deleted. Further pushes to the branch
+auto-deploy with no Action run, because the cloned deployment triggers track the branch.
+
+Railway's native "PR environments" feature can't do this. It's a project-level toggle that
+fires on every PR, with no per-PR or label-based gating (verified against the docs
+2026-07-10, only enterprise "Focused PR environments" narrows anything, and by changed
+services, not by PR). So the workflow drives the GraphQL API directly through
+[railway-preview.py](railway-preview.py), which documents the exact mutation sequence
+(environmentCreate with `sourceEnvironmentId` + `skipInitialDeploys`, deploymentTriggerUpdate
+to the PR branch, serviceDomainCreate for the api, serviceInstanceDeployV2 per service,
+environmentDelete on teardown).
+
+### Token: this needs the WORKSPACE token, not the project token
+
+The project-scoped token (`RAILWAY_PROJECT_TOKEN`) is scoped to the production environment.
+Empirically (2026-07-10) it CAN run `environmentCreate`, but it can't read, retarget, or
+delete the environment it just created, which is worse than useless (it strands an
+environment only a broader token can remove). Environment management runs on a workspace
+token instead, stored as
+
+- the `RAILWAY_WORKSPACE_TOKEN` repo secret (what the Action uses), and
+- `RAILWAY_WORKSPACE_TOKEN` in `backend/.env` for local runs of the script.
+
+Rotating it means updating both. `railway-env.py` (env-var sync) stays on the
+narrower project token; only preview create/teardown needs the wide one. Fork PRs never
+receive the secret (GitHub's rule), so previews only work for branches pushed to this repo,
+which is the intended scope.
+
+### The shared-database hazard (read this before trusting a preview)
+
+Preview environments clone production's env vars, including `DATABASE_URL`. There's no
+preview database. That means
+
+- **Migrations don't run in previews** (production-scoped `preDeployCommand`, above). A PR
+  that adds a migration deploys preview code against the OLD shared schema, so endpoints
+  touching the new column/table will 500 in the preview. That's the accepted trade-off;
+  apply the migration locally to test it, the preview verifies everything else.
+- **Preview writes are production writes.** A `demo` or `live` run started against a
+  preview api inserts real rows into the shared Supabase database. The worker's beat
+  backstops also run (the matview refresh is idempotent and harmless, the unrated sweep
+  stays inert while `RATING_MODEL` is unset in the cloned vars).
+- Redis IS per-preview (each environment gets its own instance), so queues and SSE
+  pub/sub don't cross between preview and prod.
+
+If previews ever need real isolation, the move is a Supabase branch database per PR wired
+into the same workflow, punted for now (see `packages/package-supabase/` consolidation).
+
+### One-time setup already done (dashboard-free, for the record)
+
+The `preview` GitHub label and the `RAILWAY_WORKSPACE_TOKEN` repo secret were created with
+`gh` (2026-07-10). No Railway dashboard steps were needed. The cloned services reuse the
+existing GitHub connection, so the "token can't connect GitHub repos" constraint never
+bites; connecting the repo happened once for production and clones inherit it.
