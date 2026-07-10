@@ -1,4 +1,4 @@
-# Deploy infra (Module 4)
+# Deploy infra (Module 3)
 
 Railway project **sysdesign** (`12dffbd4-65bd-44f7-83b7-d30238c92892`), one `production`
 environment, three services. Postgres is NOT here, it lives on Supabase

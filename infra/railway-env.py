@@ -53,7 +53,7 @@ MANIFEST = {
         "CELERY_BROKER_URL": ("literal", REDIS_BASE + "/0"),
         "CELERY_RESULT_BACKEND": ("literal", REDIS_BASE + "/1"),
         "APIFY_API_KEY": ("env", "APIFY_API_KEY"),
-        # Module 3 rating stage, uncomment when it ships:
+        # Module 4 rating stage, uncomment when it ships:
         # "ANTHROPIC_API_KEY": ("env", "ANTHROPIC_API_KEY"),
     },
     # redis's own REDIS_PASSWORD is deliberately NOT managed here. It was generated
