@@ -29,6 +29,7 @@ jobs:
       (github.event.action == 'reopened' && contains(github.event.pull_request.labels.*.name, 'preview'))
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
