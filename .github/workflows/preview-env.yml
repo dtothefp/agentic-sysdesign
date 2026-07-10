@@ -1,0 +1,71 @@
+# Opt-in Railway preview environments, gated on the "preview" label.
+#
+# Label a PR "preview"  -> creates Railway env pr-<number> from production,
+#                          pointed at the PR branch, comments the api URL.
+# Push more commits     -> Railway auto-deploys (the env's triggers track the
+#                          branch), no Action run needed.
+# Remove the label      -> environment deleted.
+# Close or merge the PR -> environment deleted (if it was labeled).
+#
+# Uses the RAILWAY_WORKSPACE_TOKEN repo secret (a workspace token; the
+# project-scoped token can't manage environments, see infra/README.md).
+# Fork PRs don't receive secrets, so this only works for branches in this
+# repo, which is the intended scope.
+
+name: preview-env
+
+on:
+  pull_request:
+    types: [labeled, unlabeled, closed, reopened]
+
+concurrency:
+  group: preview-env-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  up:
+    if: >-
+      (github.event.action == 'labeled' && github.event.label.name == 'preview') ||
+      (github.event.action == 'reopened' && contains(github.event.pull_request.labels.*.name, 'preview'))
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create or refresh the preview environment
+        id: up
+        env:
+          RAILWAY_WORKSPACE_TOKEN: ${{ secrets.RAILWAY_WORKSPACE_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          python3 infra/railway-preview.py up "$PR_NUMBER" "$PR_BRANCH" | tee up.log
+          grep '^PREVIEW_URL=' up.log >> "$GITHUB_OUTPUT"
+
+      - name: Comment the preview URL on the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PREVIEW_URL: ${{ steps.up.outputs.PREVIEW_URL }}
+        run: |
+          {
+            echo "Railway preview environment is up: $PREVIEW_URL"
+            echo
+            echo "Deploys track this branch automatically. Migrations do NOT run here (shared prod database); if this PR adds a migration, the preview api may not match the schema. Remove the \`preview\` label or close the PR to tear it down."
+          } > comment.md
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file comment.md
+
+  down:
+    if: >-
+      (github.event.action == 'unlabeled' && github.event.label.name == 'preview') ||
+      (github.event.action == 'closed' && contains(github.event.pull_request.labels.*.name, 'preview'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Delete the preview environment
+        env:
+          RAILWAY_WORKSPACE_TOKEN: ${{ secrets.RAILWAY_WORKSPACE_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: python3 infra/railway-preview.py down "$PR_NUMBER"
