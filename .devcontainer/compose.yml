@@ -69,10 +69,14 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       # Module 4: point the rating adapter's ollama provider at the sibling service, and
-      # default every run to the local model. Prod sets neither (rating stays inert there
-      # until a hosted-provider key lands in the Railway env manifest).
+      # default every run to the local model. Prod gets its default (a hosted Groq model)
+      # from the Railway env manifest instead.
+      # The local model must be small and NON-THINKING. qwen3:4b emits ~700 <think> tokens
+      # per rating, which container CPU can't finish inside the adapter's 180s timeout, so
+      # every call got cancelled at the deadline and retried: infinite compute burn, zero
+      # ratings, and the retry loop clogged the queue for every later run (2026-07-08).
       OLLAMA_BASE_URL: http://ollama:11434/v1
-      RATING_MODEL: ollama/qwen3:4b
+      RATING_MODEL: ollama/llama3.2:1b
     depends_on:
       db:
         condition: service_healthy

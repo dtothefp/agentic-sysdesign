@@ -52,8 +52,9 @@ in one repo that accumulates. Each finished module gets a git tag (`module-1`,
   provider-agnostic adapter, `backend/common/rating.py`, speaking the OpenAI-compatible chat
   completions shape over raw urllib (a wire format every serving stack clones, the way S3's
   API got cloned by R2 and MinIO), so local dev rates through Ollama in the devcontainer
-  (free, offline; `make ollama-pull` once, then `RATING_MODEL=ollama/qwen3:4b` is already in
-  the compose env) and prod rents a hosted model (DeepSeek, a Groq free-tier Llama, Haiku).
+  (free, offline; `make ollama-pull` once, then `RATING_MODEL=ollama/llama3.2:1b` is already
+  in the compose env; the model must be small and non-thinking, qwen3:4b's <think> preambles
+  blow the adapter's 180s timeout on container CPU) and prod rents a hosted model (DeepSeek, a Groq free-tier Llama, Haiku).
   Which model rates a run is data, not deployment config. `POST /runs` takes an optional
   `model` ("provider/model", validated at the door with a 400 via `resolve_model`), the run
   row carries it, and the rating tasks read it; env vars hold only the `RATING_MODEL`
@@ -144,7 +145,7 @@ make drills      # run drills/explain-drills.sql (whole file, smoke test)
 make api         # run the FastAPI surface (uvicorn, reload) at :8000, docs at /docs
 make worker      # DEV CONTAINER: Celery worker for Module 2 fan-out jobs (needs Redis + the API)
 make worker-beat # DEV CONTAINER: Celery beat, periodic backstops (rollup refresh + unrated sweep)
-make ollama-pull # DEV CONTAINER: one-time pull of the Module 4 local rating model (qwen3:4b)
+make ollama-pull # DEV CONTAINER: one-time pull of the Module 4 local rating model (llama3.2:1b)
 make openapi     # export the OpenAPI spec to backend/openapi.json (no db/server needed)
 make down        # drop the volume
 make reset       # down then setup

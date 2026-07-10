@@ -86,9 +86,12 @@ worker-beat:
 # DEV CONTAINER: pull the Module 4 local rating model into the ollama sibling service.
 # One-time (the model persists in the `ollama` compose volume). Uses Ollama's native
 # /api/pull because the OpenAI-compat layer only covers inference, not model management.
+# llama3.2:1b on purpose. It's small and non-thinking, so it answers well inside the
+# adapter's 180s timeout on container CPU. qwen3:4b (the original pick) thinks for ~700
+# tokens per rating and never beats the deadline, see .devcontainer/compose.yml.
 ollama-pull:
-	curl -sf http://ollama:11434/api/pull -d '{"model": "qwen3:4b"}'
-	@echo "pulled qwen3:4b"
+	curl -sf http://ollama:11434/api/pull -d '{"model": "llama3.2:1b"}'
+	@echo "pulled llama3.2:1b"
 
 # export the OpenAPI spec to a file the Module 2 frontend codegens a typed client from.
 # app.openapi() only introspects the routes, so this needs no running db or server.
