@@ -85,7 +85,11 @@ def scrape_influencer(
     rating_model = model or default_model()
     if rating_model:
         for item in new_items:
-            rate_signal.delay(item["content_hash"], inf["instagram_handle"], item["caption"], rating_model)
+            # run_id rides along so the rating task can bump this run's rated_count and publish
+            # a `rating` delta, making the (decoupled) rating phase visible on the SSE stream.
+            rate_signal.delay(
+                item["content_hash"], inf["instagram_handle"], item["caption"], rating_model, run_id
+            )
 
     done, total, run_inserted = row
     _publish(run_id, {
@@ -106,9 +110,16 @@ def scrape_influencer(
 @celery_app.task(name="worker.tasks.finalize_run", bind=True)
 def finalize_run(self, results: list[dict], run_id: int) -> dict:
     """Chord callback: runs once, after every scrape_influencer in the group has returned.
-    Refresh the rollup so it reflects this run, then close the run out and publish `done`."""
+    Refresh the rollup so it reflects this run, then move the run OUT of the scrape phase.
+
+    This does NOT mean the run is finished. If a model is in play, the run moves to `rating`
+    (not `completed`) and stays there while its rate_signal jobs drain, reaching `completed`
+    only when the last rating lands (see _announce_rating). A run with no rating work goes
+    straight to `completed` here. Either way the scrape work and the rollup refresh are done,
+    which is what this barrier is actually responsible for; ratings are decoupled by design so
+    a slow model never gates the fan-in."""
     errors = [r for r in results if r and r.get("error")]
-    status = "failed" if errors and len(errors) == len(results) else "completed"
+    failed = bool(errors and len(errors) == len(results))
     err_text = "; ".join(f"{r['handle']}: {r['error']}" for r in errors) or None
 
     # REFRESH ... CONCURRENTLY can't run inside a transaction block, so use autocommit.
@@ -116,25 +127,58 @@ def finalize_run(self, results: list[dict], run_id: int) -> dict:
         try:
             refresh_rollup(conn, concurrently=True)
         except Exception as e:  # noqa: BLE001
-            status = "failed"
+            failed = True
             err_text = f"{(err_text + '; ') if err_text else ''}refresh: {type(e).__name__}: {e}"
 
+        # Decide the post-scrape status atomically, off the row's CURRENT rated_count, so a
+        # rate_signal that bumped the counter while this callback was running can't strand the
+        # run. Rating is enabled when the run carries a model OR RATING_MODEL is set (has_env).
+        #   failed                             -> failed    (terminal)
+        #   enabled AND inserted>0 AND rated<inserted -> rating   (still draining, NOT terminal)
+        #   else                               -> completed (no ratings, or they all already landed)
+        # finished_at is stamped only on a terminal status; `rating` leaves it NULL until the
+        # final rating flips the run to completed.
+        has_env = default_model() is not None
         final = conn.cursor(row_factory=dict_row).execute(
-            "UPDATE runs SET status = %s, finished_at = now(), error = %s "
-            "WHERE id = %s RETURNING done_count, total, inserted",
-            (status, err_text, run_id),
+            """
+            UPDATE runs SET
+              status = CASE
+                WHEN %(failed)s THEN 'failed'
+                WHEN (model IS NOT NULL OR %(has_env)s) AND inserted > 0 AND rated_count < inserted
+                     THEN 'rating'
+                ELSE 'completed'
+              END,
+              finished_at = CASE
+                WHEN %(failed)s THEN now()
+                WHEN (model IS NOT NULL OR %(has_env)s) AND inserted > 0 AND rated_count < inserted
+                     THEN finished_at
+                ELSE now()
+              END,
+              error = %(err)s
+            WHERE id = %(id)s
+            RETURNING done_count, total, inserted, rated_count, status, model
+            """,
+            {"failed": failed, "has_env": has_env, "err": err_text, "id": run_id},
         ).fetchone()
 
+    # rate_total is the rating denominator: one rate_signal was enqueued per inserted signal,
+    # but only when a model is in play. `scrape_done` marks the end of the scrape phase without
+    # ending the run (status == 'rating'); a terminal status publishes `done` and closes the
+    # stream. Some ratings may already be in (rated) by the time the chord fans in.
+    rate_total = final["inserted"] if (final["model"] or has_env) else 0
+    terminal = final["status"] in ("completed", "failed")
     _publish(run_id, {
-        "type": "done",
+        "type": "done" if terminal else "scrape_done",
         "run_id": run_id,
-        "status": status,
+        "status": final["status"],
         "error": err_text,
         "done": final["done_count"],
         "total": final["total"],
         "run_inserted": final["inserted"],
+        "rated": final["rated_count"],
+        "rate_total": rate_total,
     })
-    return {"run_id": run_id, "status": status, **final}
+    return {"run_id": run_id, "status": final["status"], **final}
 
 
 # --- Module 4: the AI rating stage ----------------------------------------------
@@ -142,33 +186,99 @@ def finalize_run(self, results: list[dict], run_id: int) -> dict:
 @celery_app.task(
     name="worker.tasks.rate_signal",
     bind=True,
-    autoretry_for=(RatingError,),
-    retry_backoff=True,          # 1s, 2s, 4s... between attempts
-    retry_backoff_max=300,
-    retry_jitter=True,
     max_retries=3,
 )
-def rate_signal(self, content_hash: str, handle: str, caption: str | None, model: str) -> str:
+def rate_signal(
+    self, content_hash: str, handle: str, caption: str | None, model: str, run_id: int | None = None
+) -> str:
     """Rate one signal's content. Idempotent at both ends: skip if a rating for this hash
     already exists (dedup on the INPUT hash, the model's output is non-deterministic), and
     the insert is ON CONFLICT DO NOTHING for the race where the beat sweep and a scrape
-    enqueue the same hash. Model failures raise RatingError, which Celery retries with
-    backoff; after max_retries the signal stays unrated and the sweep picks it up later.
+    enqueue the same hash. Model failures raise RatingError; we retry with exponential backoff
+    up to max_retries, then GIVE UP but still count the signal (see below).
 
     The model call happens with NO database connection open. It can take minutes on CPU
-    inference, and a connection held across it is a pool slot doing nothing."""
+    inference, and a connection held across it is a pool slot doing nothing.
+
+    run_id ties this rating back to the run that enqueued it (scrape path). EVERY terminal
+    outcome (freshly rated, already-rated, lost-race, or gave-up-after-retries) counts once
+    toward that run's rated_count via _announce_rating. That total-coverage guarantee is what
+    lets the run converge from `rating` to `completed`: rated_count reaches inserted no matter
+    how individual ratings land. sweep-originated ratings pass run_id=None and stay silent
+    (they aren't part of any run's denominator).
+
+    Manual retry (not autoretry_for) so the give-up path runs our own code, announcing the
+    signal instead of letting the task die silently and stranding the run in `rating`."""
     with psycopg.connect(DATABASE_URL) as conn:
         if conn.execute(
             "SELECT 1 FROM signal_ratings WHERE content_hash = %s", (content_hash,)
         ).fetchone():
+            _announce_rating(run_id, handle, content_hash)
             return "already-rated"
 
-    rating = rate_caption(handle, caption or "", model)
+    try:
+        rating = rate_caption(handle, caption or "", model)
+    except RatingError as exc:
+        if self.request.retries >= self.max_retries:
+            # Out of retries. Count the signal so the run's rated_count still reaches inserted
+            # and the run can complete; the beat sweep re-rates it later (run_id=None there, so
+            # no double count) once a model is healthy.
+            _announce_rating(run_id, handle, content_hash)
+            return f"gave-up: {type(exc).__name__}"
+        raise self.retry(exc=exc, countdown=min(2 ** self.request.retries, 300))
 
     with psycopg.connect(DATABASE_URL) as conn:
         did = insert_rating(conn, content_hash, model, rating)
         conn.commit()
+    _announce_rating(run_id, handle, content_hash)
     return "rated" if did else "lost-race"
+
+
+def _announce_rating(run_id: int | None, handle: str, content_hash: str) -> None:
+    """Bump the run's rated_count and publish a delta. One call per terminally-handled signal
+    on the scrape path. No-op when run_id is None (sweep backstop): those ratings aren't part of
+    a run's denominator, so counting them would push rated_count past inserted.
+
+    The bump that brings rated_count up to inserted is the run's TRUE terminal moment, so this
+    also flips `rating` -> `completed` and stamps finished_at, in the SAME atomic UPDATE (the
+    `status = 'rating'` guard means exactly one concurrent finisher wins the flip). That bump
+    publishes `done`; every earlier bump publishes a `rating` delta. If the run isn't in
+    `rating` yet (finalize_run hasn't run, status still 'running'), the counter just increments
+    and finalize picks the right status off it later.
+
+    The counter lives in Postgres (durable snapshot for a reconnecting SSE client), the delta
+    goes to Redis (live push for a connected one), the same two-store split scrape progress
+    uses. rate_total is echoed as runs.inserted so a subscriber renders N/M off one message."""
+    if run_id is None:
+        return
+    with psycopg.connect(DATABASE_URL) as conn:
+        row = conn.execute(
+            """
+            UPDATE runs SET
+              rated_count = rated_count + 1,
+              status = CASE WHEN status = 'rating' AND rated_count + 1 >= inserted
+                            THEN 'completed' ELSE status END,
+              finished_at = CASE WHEN status = 'rating' AND rated_count + 1 >= inserted
+                                 THEN now() ELSE finished_at END
+            WHERE id = %s
+            RETURNING rated_count, inserted, status
+            """,
+            (run_id,),
+        ).fetchone()
+        conn.commit()
+    if row is None:  # run row deleted out from under us; nothing to announce
+        return
+    rated, inserted, status = row
+    terminal = status == "completed"
+    _publish(run_id, {
+        "type": "done" if terminal else "rating",
+        "run_id": run_id,
+        "influencer": handle,
+        "content_hash": content_hash,
+        "rated": rated,
+        "rate_total": inserted,
+        "run_status": status,
+    })
 
 
 # --- periodic backstops ----------------------------------------------------------
