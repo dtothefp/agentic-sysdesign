@@ -71,7 +71,9 @@ MANIFEST = {
         # out of .env just makes tracing a no-op (same inert-until-keyed contract as rating).
         "LANGSMITH_TRACING": ("literal", "true"),
         "LANGSMITH_ENDPOINT": ("literal", "https://api.smith.langchain.com"),
-        "LANGSMITH_PROJECT": ("literal", "sysdesign"),
+        # Deployed traces land in a separate project from local (backend/.env uses
+        # sysdesign-local), so the LangSmith sidebar cleanly splits prod from dev runs.
+        "LANGSMITH_PROJECT": ("literal", "sysdesign-prod"),
         "LANGSMITH_API_KEY": ("env", "LANGSMITH_API_KEY"),
     },
     # redis's own REDIS_PASSWORD is deliberately NOT managed here. It was generated
