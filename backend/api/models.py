@@ -93,6 +93,10 @@ class Run(BaseModel):
     total: int
     done_count: int
     inserted: int
+    # Module 4 visibility: how many of this run's inserted signals have been rated so far.
+    # inserted is the rating denominator; status flips to completed at scrape-done, so during
+    # the rating drain a client sees status=completed with rated_count < inserted.
+    rated_count: int = 0
     error: str | None
     created_at: datetime
     started_at: datetime | None

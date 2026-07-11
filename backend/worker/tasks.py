@@ -85,7 +85,11 @@ def scrape_influencer(
     rating_model = model or default_model()
     if rating_model:
         for item in new_items:
-            rate_signal.delay(item["content_hash"], inf["instagram_handle"], item["caption"], rating_model)
+            # run_id rides along so the rating task can bump this run's rated_count and publish
+            # a `rating` delta, making the (decoupled) rating phase visible on the SSE stream.
+            rate_signal.delay(
+                item["content_hash"], inf["instagram_handle"], item["caption"], rating_model, run_id
+            )
 
     done, total, run_inserted = row
     _publish(run_id, {
@@ -121,10 +125,15 @@ def finalize_run(self, results: list[dict], run_id: int) -> dict:
 
         final = conn.cursor(row_factory=dict_row).execute(
             "UPDATE runs SET status = %s, finished_at = now(), error = %s "
-            "WHERE id = %s RETURNING done_count, total, inserted",
+            "WHERE id = %s RETURNING done_count, total, inserted, rated_count, model",
             (status, err_text, run_id),
         ).fetchone()
 
+    # rate_total is the rating denominator: one rate_signal was enqueued per inserted signal,
+    # but only when a model is in play (on the run or in RATING_MODEL). No model means no
+    # rating phase, so the target is 0 and the SSE stream can close on `done`. Some of those
+    # ratings may already be in (rated_count on the done event) when the scrape chord finishes.
+    rate_total = final["inserted"] if (final["model"] or default_model()) else 0
     _publish(run_id, {
         "type": "done",
         "run_id": run_id,
@@ -133,6 +142,8 @@ def finalize_run(self, results: list[dict], run_id: int) -> dict:
         "done": final["done_count"],
         "total": final["total"],
         "run_inserted": final["inserted"],
+        "rated": final["rated_count"],
+        "rate_total": rate_total,
     })
     return {"run_id": run_id, "status": status, **final}
 
@@ -148,7 +159,9 @@ def finalize_run(self, results: list[dict], run_id: int) -> dict:
     retry_jitter=True,
     max_retries=3,
 )
-def rate_signal(self, content_hash: str, handle: str, caption: str | None, model: str) -> str:
+def rate_signal(
+    self, content_hash: str, handle: str, caption: str | None, model: str, run_id: int | None = None
+) -> str:
     """Rate one signal's content. Idempotent at both ends: skip if a rating for this hash
     already exists (dedup on the INPUT hash, the model's output is non-deterministic), and
     the insert is ON CONFLICT DO NOTHING for the race where the beat sweep and a scrape
@@ -156,11 +169,18 @@ def rate_signal(self, content_hash: str, handle: str, caption: str | None, model
     backoff; after max_retries the signal stays unrated and the sweep picks it up later.
 
     The model call happens with NO database connection open. It can take minutes on CPU
-    inference, and a connection held across it is a pool slot doing nothing."""
+    inference, and a connection held across it is a pool slot doing nothing.
+
+    run_id ties this rating back to the run that enqueued it (scrape path). Every terminal
+    outcome (freshly rated, already-rated, lost-race) counts once toward that run's
+    rated_count and publishes a `rating` delta, so the SSE stream shows the rating phase
+    draining instead of going silent between `progress` and `done`. sweep-originated ratings
+    pass run_id=None and stay silent (they aren't part of any run's denominator)."""
     with psycopg.connect(DATABASE_URL) as conn:
         if conn.execute(
             "SELECT 1 FROM signal_ratings WHERE content_hash = %s", (content_hash,)
         ).fetchone():
+            _announce_rating(run_id, handle, content_hash)
             return "already-rated"
 
     rating = rate_caption(handle, caption or "", model)
@@ -168,7 +188,40 @@ def rate_signal(self, content_hash: str, handle: str, caption: str | None, model
     with psycopg.connect(DATABASE_URL) as conn:
         did = insert_rating(conn, content_hash, model, rating)
         conn.commit()
+    _announce_rating(run_id, handle, content_hash)
     return "rated" if did else "lost-race"
+
+
+def _announce_rating(run_id: int | None, handle: str, content_hash: str) -> None:
+    """Bump the run's rated_count and publish a `rating` delta. One call per terminally-rated
+    signal on the scrape path. No-op when run_id is None (sweep backstop): those ratings aren't
+    part of a run's denominator, so counting them would push rated_count past inserted.
+
+    The counter lives in Postgres (durable snapshot for a reconnecting SSE client) and the delta
+    goes to Redis (live push for a currently-connected one), the same two-store split the scrape
+    progress uses. rate_total is echoed as runs.inserted so a late subscriber can render N/M off
+    a single message without reading the row."""
+    if run_id is None:
+        return
+    with psycopg.connect(DATABASE_URL) as conn:
+        row = conn.execute(
+            "UPDATE runs SET rated_count = rated_count + 1 WHERE id = %s "
+            "RETURNING rated_count, inserted, status",
+            (run_id,),
+        ).fetchone()
+        conn.commit()
+    if row is None:  # run row deleted out from under us; nothing to announce
+        return
+    rated, inserted, status = row
+    _publish(run_id, {
+        "type": "rating",
+        "run_id": run_id,
+        "influencer": handle,
+        "content_hash": content_hash,
+        "rated": rated,
+        "rate_total": inserted,
+        "run_status": status,
+    })
 
 
 # --- periodic backstops ----------------------------------------------------------
