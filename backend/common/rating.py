@@ -126,24 +126,20 @@ def _parse_rating(content: str) -> dict[str, Any]:
 
 
 @traceable(run_type="llm", name="rate_caption")
-def rate_caption(handle: str, caption: str, model: str, timeout: int = 180) -> dict[str, Any]:
-    """One rating: chat completions request out, validated dict back.
+def _chat_completion(messages: list[dict[str, str]], model: str, timeout: int = 180) -> dict[str, Any]:
+    """The one model call, isolated so LangSmith renders it as a proper LLM run.
 
-    The generous timeout is for the CPU-inference case (local Ollama streams a handful of
-    tokens per second). Hosted GPU providers answer in a second or two.
+    This is the traced boundary, not rate_caption, for one specific reason: LangSmith shows a
+    run's prompt only when the traced INPUTS carry a `messages` list, and shows the completion
+    only when the OUTPUT is the OpenAI response shape (choices[].message). So the traced function
+    takes `messages` in and returns the raw response, which is exactly what makes the Tracing
+    view display the system+user prompt and the model's reply. Resolving the api_key INSIDE (it's
+    never a parameter) keeps the secret out of the trace inputs.
 
-    @traceable emits one LangSmith run per call (inputs = handle/caption/model, output = the
-    validated rating). It's inert unless LANGSMITH_TRACING=true and a key are set.
+    Inert unless LANGSMITH_TRACING=true and a key are set (@traceable degrades to a passthrough).
     """
     provider, model_name, base_url, api_key = resolve_model(model)
-    body: dict[str, Any] = {
-        "model": model_name,
-        "temperature": 0,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Creator: @{handle}\nCaption:\n{caption or '(no caption)'}"},
-        ],
-    }
+    body: dict[str, Any] = {"model": model_name, "temperature": 0, "messages": messages}
     if PROVIDERS[provider]["json_mode"]:
         body["response_format"] = {"type": "json_object"}
 
@@ -167,16 +163,29 @@ def rate_caption(handle: str, caption: str, model: str, timeout: int = 180) -> d
     except (urllib.error.URLError, TimeoutError) as e:
         raise RatingError(f"{provider} unreachable at {base_url}: {e}") from None
 
-    try:
-        content = resp["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
-        raise RatingError(f"unexpected response shape from {provider}: {str(resp)[:200]!r}") from None
-
     # Feed token counts to LangSmith so its dashboard shows tokens and $ per rating. An SDK
     # response would surface these automatically; with raw urllib we hand them over ourselves.
     # OpenAI-compatible usage keys map onto LangSmith's usage_metadata shape; no-op when tracing
     # is off (get_current_run_tree() is None) or the provider omitted usage.
     _record_usage(resp.get("usage"), provider, model_name)
+    return resp
+
+
+def rate_caption(handle: str, caption: str, model: str, timeout: int = 180) -> dict[str, Any]:
+    """One rating: build the prompt, call the model (traced), validate the reply.
+
+    The generous timeout is for the CPU-inference case (local Ollama streams a handful of
+    tokens per second). Hosted GPU providers answer in a second or two.
+    """
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": f"Creator: @{handle}\nCaption:\n{caption or '(no caption)'}"},
+    ]
+    resp = _chat_completion(messages, model, timeout)
+    try:
+        content = resp["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        raise RatingError(f"unexpected response shape: {str(resp)[:200]!r}") from None
     return _parse_rating(content)
 
 
