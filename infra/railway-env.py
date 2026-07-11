@@ -74,9 +74,11 @@ MANIFEST = {
         # Deployed traces land in a separate project from local (backend/.env uses
         # sysdesign-local), so the LangSmith sidebar cleanly splits prod from dev runs.
         "LANGSMITH_PROJECT": ("literal", "sysdesign-prod"),
-        # Prod gets its OWN LangSmith key (the local worker uses LANGSMITH_API_KEY), so either
-        # environment's key can be revoked without touching the other. Pushed as LANGSMITH_API_KEY.
-        "LANGSMITH_API_KEY": ("env", "LANGSMITH_API_KEY_PROD"),
+        # Prod gets its OWN LangSmith key (the local worker uses the local LANGSMITH_API_KEY), so
+        # either environment's key can be revoked without touching the other. This key lives ONLY
+        # in Railway, never in backend/.env, since it has no local use. env_optional means: push it
+        # from .env when it happens to be present (the rotation path), else leave Railway's be.
+        "LANGSMITH_API_KEY": ("env_optional", "LANGSMITH_API_KEY_PROD"),
     },
     # redis's own REDIS_PASSWORD is deliberately NOT managed here. It was generated
     # once at provision time; rotating it is a deliberate act, not a sync side effect.
@@ -124,10 +126,20 @@ def remote_vars(token: str, service_id: str) -> dict:
     })["variables"]
 
 
-def resolve(entry: tuple, dotenv: dict) -> str:
+# Sentinel for a manifest entry we deliberately leave untouched this run (a prod-only secret
+# that lives in Railway and isn't in backend/.env).
+_SKIP = object()
+
+
+def resolve(entry: tuple, dotenv: dict):
     kind, val = entry
     if kind == "literal":
         return val
+    if kind == "env_optional":
+        # Prod-only secret managed in Railway, not in backend/.env. Push it only when it IS in
+        # .env (the rotation path: drop the new key in, sync, remove); otherwise leave Railway's
+        # value alone instead of erroring on the blank.
+        return dotenv.get(val, _SKIP)
     if val not in dotenv:
         sys.exit(f"backend/.env is missing {val}, refusing to sync a blank")
     return dotenv[val]
@@ -156,6 +168,10 @@ def cmd_sync(token: str, dry: bool) -> None:
         current = remote_vars(token, svc_id)
         for name, entry in wanted.items():
             value = resolve(entry, dotenv)
+            if value is _SKIP:
+                where = "already in Railway" if name in current else "MISSING from Railway too"
+                print(f"  {svc}.{name}: skip ({where}, not in .env)")
+                continue
             if current.get(name) == value:
                 print(f"  {svc}.{name}: unchanged")
                 continue
