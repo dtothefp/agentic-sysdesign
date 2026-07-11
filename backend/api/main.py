@@ -324,29 +324,34 @@ def get_run(run_id: int):
 async def stream_run(run_id: int):
     """Server-Sent Events: live progress for one run, across BOTH phases.
 
-    A run has two phases the stream surfaces as distinct events:
-      - scrape phase: one `progress` event per influencer, ending in `done` (the chord's
-        fan-in, which also flips the run to completed/failed).
-      - rating phase: one `rating` event per signal rated, carrying rated/rate_total. This
-        phase is DECOUPLED from the scrape chord (a slow model never blocks a scrape), so its
-        events keep arriving AFTER `done`. The stream deliberately stays open through it and
-        closes only once every expected rating has landed (rate_total, which the worker sets
-        to 0 when rating is disabled, so a rating-less run closes on `done`).
+    The run lifecycle is queued -> running -> (rating) -> completed/failed, and the stream
+    surfaces it as four event types:
+      - `progress`: one per influencer during the scrape phase.
+      - `scrape_done`: the scrape chord fanned in and the rollup refreshed. If a model is in
+        play the run is now in `rating` (NOT finished), and this is the cue to switch the UI
+        from "scraping X/N" to "rating Y/M".
+      - `rating`: one per signal rated, carrying rated/rate_total. Decoupled from the scrape
+        chord by design (a slow model never blocks the fan-in), so these arrive after
+        `scrape_done`.
+      - `done`: the run reached a TERMINAL state. The worker owns this decision, it emits
+        `done` at fan-in when there's no rating work, or when the last rating lands. The
+        stream's only job is to relay deltas and close on `done`.
 
     The refresh-proof pattern, in order:
       1. subscribe to the Redis channel FIRST, so no delta published during step 2 is lost.
       2. read the runs row from Postgres and send it as the `snapshot` event. A client that
          connects late, or reconnects after a page refresh, gets the true current state here.
-      3. if the run is already terminal on connect, send `done` and close. (Reconnecting
-         mid-rating-drain is the one case this doesn't stream live; the snapshot carries
-         rated_count/inserted so the client can poll GET /runs/{id} for the tail.)
-      4. otherwise stream deltas: `progress`, then `rating`, closing when scraping is done
-         AND ratings are all in.
+      3. if the run is already terminal on connect, send `done` and close.
+      4. otherwise relay deltas and close when a `done` arrives.
 
     A refresh just reopens this endpoint. There's no per-user registration to lose: the run_id
     in the URL is the whole subscription, and the snapshot re-establishes state every time.
+    (Reconnecting mid-rating-drain is safe: we subscribe before reading the snapshot, so the
+    `done` that ends the rating phase either is already reflected in the snapshot as a terminal
+    status, or arrives on the channel after we're listening.)
     """
     channel = f"run:{run_id}"
+    _EVENTS = {"progress", "scrape_done", "rating", "done"}
 
     async def gen():
         r = aioredis.from_url(REDIS_URL)
@@ -362,29 +367,17 @@ async def stream_run(run_id: int):
             if snapshot["status"] in ("completed", "failed"):
                 yield {"event": "done", "data": snap_json}  # (3) already terminal
                 return
-            # (4) live deltas. Close only when the scrape phase is done AND every expected
-            # rating has landed. done_seen guards against a `rating` that arrives before `done`
-            # (scrapes not finished yet) from closing the stream early.
-            done_seen = False
-            rate_target = 0
+            # (4) live deltas. The worker decides when the run is done and publishes `done`
+            # exactly then (fan-in for a rating-less run, or the final rating). Relay each
+            # delta under its own event name and close on `done`.
             async for msg in pubsub.listen():
                 if msg["type"] != "message":
                     continue
                 text = msg["data"].decode() if isinstance(msg["data"], bytes) else msg["data"]
-                data = json.loads(text)
-                mtype = data.get("type")
+                mtype = json.loads(text).get("type")
+                yield {"event": mtype if mtype in _EVENTS else "progress", "data": text}
                 if mtype == "done":
-                    yield {"event": "done", "data": text}
-                    done_seen = True
-                    rate_target = data.get("rate_total", 0)
-                    if data.get("rated", 0) >= rate_target:
-                        return  # ratings already drained (or none expected)
-                elif mtype == "rating":
-                    yield {"event": "rating", "data": text}
-                    if done_seen and data.get("rated", 0) >= rate_target:
-                        return  # scrape done and the last rating just landed
-                else:
-                    yield {"event": "progress", "data": text}
+                    return
         finally:
             await pubsub.unsubscribe(channel)
             await pubsub.aclose()

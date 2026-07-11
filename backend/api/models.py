@@ -87,15 +87,18 @@ class RunCreated(BaseModel):
 
 class Run(BaseModel):
     id: int
-    status: str  # queued | running | completed | failed
+    # queued -> running -> (rating) -> completed | failed. `rating` is the phase after the
+    # scrape chord fans in but before every signal has been rated; a run with no rating work
+    # skips it and completes at fan-in. See stream_run for the matching SSE events.
+    status: str
     mode: str
     model: str | None = None  # rating model recorded on the run (data plane)
     total: int
     done_count: int
     inserted: int
     # Module 4 visibility: how many of this run's inserted signals have been rated so far.
-    # inserted is the rating denominator; status flips to completed at scrape-done, so during
-    # the rating drain a client sees status=completed with rated_count < inserted.
+    # inserted is the rating denominator; the run sits in `rating` with rated_count < inserted
+    # until the last rating lands, then flips to `completed`.
     rated_count: int = 0
     error: str | None
     created_at: datetime
