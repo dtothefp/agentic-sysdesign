@@ -74,7 +74,9 @@ MANIFEST = {
         # Deployed traces land in a separate project from local (backend/.env uses
         # sysdesign-local), so the LangSmith sidebar cleanly splits prod from dev runs.
         "LANGSMITH_PROJECT": ("literal", "sysdesign-prod"),
-        "LANGSMITH_API_KEY": ("env", "LANGSMITH_API_KEY"),
+        # Prod gets its OWN LangSmith key (the local worker uses LANGSMITH_API_KEY), so either
+        # environment's key can be revoked without touching the other. Pushed as LANGSMITH_API_KEY.
+        "LANGSMITH_API_KEY": ("env", "LANGSMITH_API_KEY_PROD"),
     },
     # redis's own REDIS_PASSWORD is deliberately NOT managed here. It was generated
     # once at provision time; rotating it is a deliberate act, not a sync side effect.
