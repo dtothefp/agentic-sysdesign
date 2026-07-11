@@ -12,6 +12,8 @@ dependencies = [
   "celery>=5.4",          # task queue: fan-out (group) + fan-in (chord), Redis broker
   "redis>=5.0",           # broker/result-backend client + the pub/sub bus for progress
   "sse-starlette>=2.1",   # EventSourceResponse: FastAPI-native SSE (disconnect + keep-alive)
+  # Module 4: LangSmith tracing for the rating model call (standalone @traceable, no LangChain).
+  "langsmith>=0.10.2",
 ]
 
 [tool.uv]

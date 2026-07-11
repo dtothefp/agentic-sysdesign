@@ -66,6 +66,13 @@ MANIFEST = {
         "RATING_MODEL": ("literal", "groq/llama-3.1-8b-instant"),
         "GROQ_API_KEY": ("env", "GROQ_API_KEY"),
         "ANTHROPIC_API_KEY": ("env", "ANTHROPIC_API_KEY"),
+        # LangSmith tracing for the rating call. Worker-only: rate_caption runs here, never on
+        # the API. Inert unless LANGSMITH_TRACING=true AND the key resolve, so leaving the key
+        # out of .env just makes tracing a no-op (same inert-until-keyed contract as rating).
+        "LANGSMITH_TRACING": ("literal", "true"),
+        "LANGSMITH_ENDPOINT": ("literal", "https://api.smith.langchain.com"),
+        "LANGSMITH_PROJECT": ("literal", "sysdesign"),
+        "LANGSMITH_API_KEY": ("env", "LANGSMITH_API_KEY"),
     },
     # redis's own REDIS_PASSWORD is deliberately NOT managed here. It was generated
     # once at provision time; rotating it is a deliberate act, not a sync side effect.
