@@ -31,6 +31,25 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+# Observability, LangSmith. The one model call in this module is a natural choke point, so a
+# single @traceable there captures every rating's prompt, output, latency, and errors. This
+# does NOT touch the raw-urllib design, LangSmith is a tracer, not an LLM SDK, so the wire
+# format stays the studyable artifact. It's a no-op until LANGSMITH_TRACING=true and a key are
+# in the env (same inert-until-keyed contract as the rating layer itself). Soft-imported so a
+# venv without the package still runs, the decorator just degrades to a passthrough.
+try:
+    from langsmith import traceable
+    from langsmith.run_helpers import get_current_run_tree
+except ImportError:  # pragma: no cover - tracing is optional
+    def traceable(*d_args: Any, **d_kwargs: Any):  # type: ignore[misc]
+        # support both bare @traceable and @traceable(run_type=..., ...)
+        if len(d_args) == 1 and callable(d_args[0]) and not d_kwargs:
+            return d_args[0]
+        return lambda fn: fn
+
+    def get_current_run_tree():  # type: ignore[misc]
+        return None
+
 # Registry of OpenAI-compatible providers. base_url can be overridden per provider with
 # <PROVIDER>_BASE_URL (the devcontainer sets OLLAMA_BASE_URL=http://ollama:11434/v1).
 # json_mode=False means the provider's compatibility layer doesn't accept response_format,
@@ -106,11 +125,15 @@ def _parse_rating(content: str) -> dict[str, Any]:
     return rating
 
 
+@traceable(run_type="llm", name="rate_caption")
 def rate_caption(handle: str, caption: str, model: str, timeout: int = 180) -> dict[str, Any]:
     """One rating: chat completions request out, validated dict back.
 
     The generous timeout is for the CPU-inference case (local Ollama streams a handful of
     tokens per second). Hosted GPU providers answer in a second or two.
+
+    @traceable emits one LangSmith run per call (inputs = handle/caption/model, output = the
+    validated rating). It's inert unless LANGSMITH_TRACING=true and a key are set.
     """
     provider, model_name, base_url, api_key = resolve_model(model)
     body: dict[str, Any] = {
@@ -148,7 +171,34 @@ def rate_caption(handle: str, caption: str, model: str, timeout: int = 180) -> d
         content = resp["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError):
         raise RatingError(f"unexpected response shape from {provider}: {str(resp)[:200]!r}") from None
+
+    # Feed token counts to LangSmith so its dashboard shows tokens and $ per rating. An SDK
+    # response would surface these automatically; with raw urllib we hand them over ourselves.
+    # OpenAI-compatible usage keys map onto LangSmith's usage_metadata shape; no-op when tracing
+    # is off (get_current_run_tree() is None) or the provider omitted usage.
+    _record_usage(resp.get("usage"), provider, model_name)
     return _parse_rating(content)
+
+
+def _record_usage(usage: dict[str, Any] | None, provider: str, model_name: str) -> None:
+    """Attach OpenAI-style usage to the active LangSmith run, if there is one.
+
+    ls_model_name lets LangSmith match its price table for the $ column; provider is just a
+    filterable tag. usage_metadata in the run's outputs is the schema LangSmith reads token
+    counts from (an SDK response would populate it for us)."""
+    run = get_current_run_tree()
+    if run is None:
+        return
+    run.add_metadata({"provider": provider, "ls_model_name": model_name})
+    if not usage:
+        return
+    run.add_outputs({
+        "usage_metadata": {
+            "input_tokens": usage.get("prompt_tokens", 0),
+            "output_tokens": usage.get("completion_tokens", 0),
+            "total_tokens": usage.get("total_tokens", 0),
+        }
+    })
 
 
 def insert_rating(conn, content_hash: str, model: str, rating: dict[str, Any]) -> bool:
