@@ -19,12 +19,14 @@ never blocks the event loop. One pool, opened at startup, closed at shutdown.
 import asyncio
 import json
 import os
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime
 
 import psycopg
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Security
 from fastapi.routing import APIRoute
+from fastapi.security.api_key import APIKeyHeader
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 from redis import asyncio as aioredis
@@ -32,6 +34,10 @@ from sse_starlette.sse import EventSourceResponse
 
 from api.models import (
     DailyRollup,
+    Digest,
+    DigestContent,
+    DigestCreated,
+    DigestTrigger,
     Influencer,
     InfluencerIn,
     InfluencerWatermark,
@@ -48,7 +54,7 @@ from api.models import (
 from common.db import DATABASE_URL
 from common.rating import resolve_model
 from common.signals import insert_signal
-from worker.tasks import start_run
+from worker.tasks import start_digest, start_run
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
 
@@ -60,6 +66,36 @@ async def lifespan(app: FastAPI):
     pool.open()
     yield
     pool.close()
+
+
+# --- auth (Module 5) -------------------------------------------------------------
+#
+# One shared key on the X-API-Key header, enforced by a single app-level dependency.
+# Same inert-until-keyed contract as the rating layer: SYSDESIGN_API_KEY unset means
+# the API is open, set means every route below enforces it. /health stays open
+# (Railway's healthcheck sends no headers). /openapi.json and /docs stay open too,
+# they're Starlette-level routes that app dependencies never run on, and that's the
+# point: the spec is the public discovery surface, and the security scheme declared
+# in it (via Security(APIKeyHeader)) is how a client, or the Module 5 agent reading
+# the spec, learns that data routes want a key.
+#
+# compare_digest instead of == so the check runs in constant time. A plain string
+# compare bails at the first wrong byte, and that timing difference is measurable
+# enough to leak a key byte-by-byte over a network (a timing attack).
+
+API_KEY_HEADER = APIKeyHeader(
+    name="X-API-Key",
+    auto_error=False,  # missing header -> None, we decide (else FastAPI 403s even when unkeyed)
+    description="Required on data routes when the deployment sets SYSDESIGN_API_KEY.",
+)
+
+
+def require_api_key(request: Request, key: str | None = Security(API_KEY_HEADER)) -> None:
+    expected = os.environ.get("SYSDESIGN_API_KEY")
+    if not expected or request.url.path == "/health":
+        return
+    if key is None or not secrets.compare_digest(key, expected):
+        raise HTTPException(401, "missing or invalid X-API-Key")
 
 
 def _operation_id(route: APIRoute) -> str:
@@ -77,6 +113,7 @@ TAGS = [
     {"name": "rollup", "description": "Precomputed daily counts (materialized view)."},
     {"name": "runs", "description": "Background fan-out scrape jobs + live SSE progress."},
     {"name": "ratings", "description": "Per-signal AI ratings, keyed on content_hash."},
+    {"name": "digests", "description": "Weekly agent-written digests (Module 5). The agent delivers its own result via PUT."},
 ]
 
 app = FastAPI(
@@ -90,6 +127,7 @@ app = FastAPI(
     openapi_tags=TAGS,
     lifespan=lifespan,
     generate_unique_id_function=_operation_id,
+    dependencies=[Depends(require_api_key)],
 )
 
 
@@ -401,3 +439,140 @@ def list_ratings(limit: int = Query(50, le=200), min_relevance: float | None = Q
     params.append(limit)
     with pool.connection() as conn:
         return conn.cursor(row_factory=dict_row).execute(sql, params).fetchall()
+
+
+# --- Module 5: agent-written digests ----------------------------------------------
+
+_DIGEST_COLS = "id, status, session_id, content_md, word_count, error, created_at, completed_at"
+
+
+def _read_digest(digest_id: int) -> dict | None:
+    """One PK lookup for a digest's authoritative state, shared by the GET snapshot and
+    (via asyncio.to_thread) the SSE stream's on-connect snapshot. Same split as _read_run."""
+    with pool.connection() as conn:
+        return (
+            conn.cursor(row_factory=dict_row)
+            .execute(f"SELECT {_DIGEST_COLS} FROM digests WHERE id = %s", (digest_id,))
+            .fetchone()
+        )
+
+
+@app.post("/digests", response_model=DigestCreated, tags=["digests"])
+def create_digest(trigger: DigestTrigger = Body(default_factory=DigestTrigger)):
+    """Kick off one digest agent session. Creates the digests row, enqueues the worker
+    task that babysits the Managed Agent session, and returns immediately with the id,
+    the same 202-style shape as POST /runs. Watch progress with GET /digests/{id}.
+
+    The body is optional: a bodyless POST kicks off a prod digest (the worker falls
+    back to SYSDESIGN_PUBLIC_URL, then the prod domain). base_url in the body redirects
+    the agent at a PR preview or local tunnel; leave it unset in production."""
+    return DigestCreated(**start_digest(base_url=trigger.base_url))
+
+
+@app.get("/digests", response_model=list[Digest], tags=["digests"])
+def list_digests(limit: int = Query(20, le=100)):
+    """Recent digests, newest first."""
+    with pool.connection() as conn:
+        return (
+            conn.cursor(row_factory=dict_row)
+            .execute(f"SELECT {_DIGEST_COLS} FROM digests ORDER BY created_at DESC LIMIT %s", (limit,))
+            .fetchall()
+        )
+
+
+@app.get("/digests/{digest_id}", response_model=Digest, tags=["digests"])
+def get_digest(digest_id: int):
+    """One digest's current state, content included once the agent has delivered."""
+    row = _read_digest(digest_id)
+    if row is None:
+        raise HTTPException(404, f"digest {digest_id} not found")
+    return row
+
+
+@app.get("/digests/{digest_id}/stream", tags=["digests"])
+async def stream_digest(digest_id: int):
+    """Server-Sent Events: live narration of one digest agent session.
+
+    This is a RELAY, two streams glued back to back. Upstream, the worker holds the
+    Anthropic session event stream and republishes the interesting events as deltas on
+    Redis channel digest:{id}. Downstream, this endpoint turns those deltas into SSE.
+    The UI couples to our API only; which vendor runs the agent is the worker's secret.
+
+    Event types, in the order a healthy run emits them:
+      - `snapshot`: the digests row on connect (always first; refresh-proof state).
+      - `status`: the worker created the session, carries session_id for the trace link.
+      - `agent_message` / `tool` / `custom_tool` / `custom_tool_result`: narration,
+        "what is the agent doing right now", for a ticker UI.
+      - `done`: terminal verdict (completed/failed), decided by the WORKER after its
+        final row check, because completion is judged by the database (the agent's PUT),
+        never by how the transcript looked. Stream closes on it.
+
+    Same refresh-proof choreography as /runs/{run_id}/stream: subscribe FIRST, then
+    snapshot from Postgres, then relay; a client connecting after the run ended gets
+    snapshot + done and closes without ever touching Redis history (there is none,
+    pub/sub is fire-and-forget; the row is the durable record)."""
+    channel = f"digest:{digest_id}"
+    _EVENTS = {"status", "agent_message", "tool", "custom_tool", "custom_tool_result", "done"}
+
+    async def gen():
+        r = aioredis.from_url(REDIS_URL)
+        pubsub = r.pubsub()
+        await pubsub.subscribe(channel)  # subscribe before snapshot: no gap
+        try:
+            snapshot = await asyncio.to_thread(_read_digest, digest_id)
+            if snapshot is None:
+                yield {"event": "error",
+                       "data": json.dumps({"error": f"digest {digest_id} not found"})}
+                return
+            snap_json = Digest(**snapshot).model_dump_json()
+            yield {"event": "snapshot", "data": snap_json}
+            if snapshot["status"] in ("completed", "failed"):
+                yield {"event": "done", "data": snap_json}  # already terminal
+                return
+            async for msg in pubsub.listen():
+                if msg["type"] != "message":
+                    continue
+                text = msg["data"].decode() if isinstance(msg["data"], bytes) else msg["data"]
+                mtype = json.loads(text).get("type")
+                yield {"event": mtype if mtype in _EVENTS else "status", "data": text}
+                if mtype == "done":
+                    return
+        finally:
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
+            await r.aclose()
+
+    return EventSourceResponse(gen())
+
+
+@app.put("/digests/{digest_id}/content", response_model=Digest, tags=["digests"])
+def deliver_digest(digest_id: int, body: DigestContent):
+    """The agent's delivery door. The digest agent calls this from its sandbox with the
+    finished markdown, authenticated by the same vaulted X-API-Key as every data route.
+    Storing the content IS what completes the run; the worker watching the session only
+    marks failure if the stream ends and this call never arrived.
+
+    PUT because delivery is idempotent by design: re-delivering the same digest (an
+    agent retrying a flaky request) just overwrites the row with the same content, no
+    duplicate rows, no counter to corrupt."""
+    with pool.connection() as conn:
+        row = (
+            conn.cursor(row_factory=dict_row)
+            .execute(
+                """
+                UPDATE digests SET
+                  content_md = %s,
+                  word_count = %s,
+                  status = 'completed',
+                  completed_at = now(),
+                  error = NULL
+                WHERE id = %s
+                RETURNING """ + _DIGEST_COLS,
+                (body.content_md, len(body.content_md.split()), digest_id),
+            )
+            .fetchone()
+        )
+        conn.commit()
+    if row is None:
+        raise HTTPException(404, f"digest {digest_id} not found")
+    return row

@@ -9,11 +9,12 @@ dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
   # Module 2: background fan-out + live progress.
-  "celery>=5.4",          # task queue: fan-out (group) + fan-in (chord), Redis broker
-  "redis>=5.0",           # broker/result-backend client + the pub/sub bus for progress
-  "sse-starlette>=2.1",   # EventSourceResponse: FastAPI-native SSE (disconnect + keep-alive)
+  "celery>=5.4", # task queue: fan-out (group) + fan-in (chord), Redis broker
+  "redis>=5.0", # broker/result-backend client + the pub/sub bus for progress
+  "sse-starlette>=2.1", # EventSourceResponse: FastAPI-native SSE (disconnect + keep-alive)
   # Module 4: LangSmith tracing for the rating model call (standalone @traceable, no LangChain).
   "langsmith>=0.10.2",
+  "anthropic>=0.116.0",
 ]
 
 [tool.uv]

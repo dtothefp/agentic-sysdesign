@@ -56,6 +56,18 @@ services:
     volumes:
       - ..:/workspace:cached
     command: sleep infinity
+    # Load backend/.env into the container's environment (same pattern as the beeks
+    # devcontainer, but pointed at the one secrets file this repo already has instead
+    # of a second copy under .devcontainer/). Python processes never needed this
+    # (common/env.py fills os.environ from backend/.env on import), but the SHELL did:
+    # this is what makes `curl -H "X-API-Key: $SYSDESIGN_API_KEY" ...` work in a
+    # container terminal. Values bake in at container create, so after editing
+    # backend/.env, rebuild/restart the dev container to see changes in the shell.
+    # The explicit `environment:` block below always wins over env_file, so the
+    # compose-owned URLs (db, redis, ollama) can't be clobbered from .env.
+    env_file:
+      - path: ../backend/.env
+        required: false
     environment:
       DATABASE_URL: postgresql://lab:lab@db:5432/sysdesign
       # keep uv's venv OUTSIDE the bind mount. the host's /workspace/.venv is a macOS

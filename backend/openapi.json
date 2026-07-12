@@ -26,7 +26,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
       }
     },
     "/influencers": {
@@ -51,7 +56,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -90,7 +100,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
       }
     },
     "/influencers/bulk": {
@@ -140,7 +155,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
       }
     },
     "/influencers/{influencer_id}": {
@@ -151,6 +171,11 @@
         "summary": "Update Watermark",
         "description": "Advance the incremental-scrape watermark. The scraper calls this after a run so the\nnext run only pulls posts newer than last_scraped_at.",
         "operationId": "update_watermark",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "influencer_id",
@@ -203,6 +228,11 @@
         ],
         "summary": "List Sources",
         "operationId": "list_sources",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "influencer_id",
@@ -254,6 +284,11 @@
         ],
         "summary": "Create Source",
         "operationId": "create_source",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -296,6 +331,11 @@
         "summary": "Create Signal",
         "description": "Idempotent write. content_hash is derived server-side, so identical payloads dedupe no\nmatter who sends them. Returns inserted=False when the exact signal already existed. The\nactual upsert is common.signals.insert_signal, the same function the Celery worker calls,\nso there's literally one write path.",
         "operationId": "create_signal",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -336,6 +376,11 @@
         "summary": "List Signals",
         "description": "A time window is REQUIRED so the query always carries the partition key and prunes.\nFiltering by influencer alone (no window) would fan out across every partition, so the\nAPI simply doesn't offer that shape.",
         "operationId": "list_signals",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "from",
@@ -425,6 +470,11 @@
         "summary": "Rollup",
         "description": "Reads the precomputed daily_signal_rollup matview, not raw_signals. The dashboard\nnever pays for the aggregate. Refresh happens out of band (make seed / a scheduled job).",
         "operationId": "rollup",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "influencer_id",
@@ -479,6 +529,11 @@
         "summary": "Create Run",
         "description": "Kick off a fan-out scrape. Creates the runs row, enqueues one Celery task per\ninfluencer plus a fan-in callback that refreshes the rollup, and returns the run_id.\nReturns immediately (202-style): the work happens in the worker, watch it on the stream.\n\nAn unknown provider or a missing provider key is rejected HERE with a 400, before any\ntask is enqueued. Fail at the door: a bad model string should never make it into the\nqueue where it would surface as N retry-looping worker tasks instead of one clear error.",
         "operationId": "create_run",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -519,6 +574,11 @@
         "summary": "List Runs",
         "description": "Recent runs, newest first. The dashboard's run history.",
         "operationId": "list_runs",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "limit",
@@ -568,6 +628,11 @@
         "summary": "Get Run",
         "description": "A run's current state, straight from Postgres (the durable record). This is the\nsnapshot a client can read at any time, no stream needed.",
         "operationId": "get_run",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -609,8 +674,13 @@
           "runs"
         ],
         "summary": "Stream Run",
-        "description": "Server-Sent Events: live progress for one run.\n\nThe refresh-proof pattern, in order:\n  1. subscribe to the Redis channel FIRST, so no delta published during step 2 is lost.\n  2. read the runs row from Postgres and send it as the `snapshot` event. A client that\n     connects late, or reconnects after a page refresh, gets the true current state here.\n  3. if the run is already finished, send `done` and close (nothing more will publish).\n  4. otherwise stream each Redis delta as a `progress` event until `done`.\n\nA refresh just reopens this endpoint. There's no per-user registration to lose: the run_id\nin the URL is the whole subscription, and the snapshot re-establishes state every time.",
+        "description": "Server-Sent Events: live progress for one run, across BOTH phases.\n\nThe run lifecycle is queued -> running -> (rating) -> completed/failed, and the stream\nsurfaces it as four event types:\n  - `progress`: one per influencer during the scrape phase.\n  - `scrape_done`: the scrape chord fanned in and the rollup refreshed. If a model is in\n    play the run is now in `rating` (NOT finished), and this is the cue to switch the UI\n    from \"scraping X/N\" to \"rating Y/M\".\n  - `rating`: one per signal rated, carrying rated/rate_total. Decoupled from the scrape\n    chord by design (a slow model never blocks the fan-in), so these arrive after\n    `scrape_done`.\n  - `done`: the run reached a TERMINAL state. The worker owns this decision, it emits\n    `done` at fan-in when there's no rating work, or when the last rating lands. The\n    stream's only job is to relay deltas and close on `done`.\n\nThe refresh-proof pattern, in order:\n  1. subscribe to the Redis channel FIRST, so no delta published during step 2 is lost.\n  2. read the runs row from Postgres and send it as the `snapshot` event. A client that\n     connects late, or reconnects after a page refresh, gets the true current state here.\n  3. if the run is already terminal on connect, send `done` and close.\n  4. otherwise relay deltas and close when a `done` arrives.\n\nA refresh just reopens this endpoint. There's no per-user registration to lose: the run_id\nin the URL is the whole subscription, and the snapshot re-establishes state every time.\n(Reconnecting mid-rating-drain is safe: we subscribe before reading the snapshot, so the\n`done` that ends the rating phase either is already reflected in the snapshot as a terminal\nstatus, or arrives on the channel after we're listening.)",
         "operationId": "stream_run",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -652,6 +722,11 @@
         "summary": "List Ratings",
         "description": "Recent ratings, newest first. min_relevance filters to what the model considered\non-thesis, which is the view the Module 5 digest agent will eventually read.",
         "operationId": "list_ratings",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "limit",
@@ -710,6 +785,256 @@
           }
         }
       }
+    },
+    "/digests": {
+      "post": {
+        "tags": [
+          "digests"
+        ],
+        "summary": "Create Digest",
+        "description": "Kick off one digest agent session. Creates the digests row, enqueues the worker\ntask that babysits the Managed Agent session, and returns immediately with the id,\nthe same 202-style shape as POST /runs. Watch progress with GET /digests/{id}.\n\nThe body is optional: a bodyless POST kicks off a prod digest (the worker falls\nback to SYSDESIGN_PUBLIC_URL, then the prod domain). base_url in the body redirects\nthe agent at a PR preview or local tunnel; leave it unset in production.",
+        "operationId": "create_digest",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DigestTrigger"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DigestCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "digests"
+        ],
+        "summary": "List Digests",
+        "description": "Recent digests, newest first.",
+        "operationId": "list_digests",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Digest"
+                  },
+                  "title": "Response List Digests"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/digests/{digest_id}": {
+      "get": {
+        "tags": [
+          "digests"
+        ],
+        "summary": "Get Digest",
+        "description": "One digest's current state, content included once the agent has delivered.",
+        "operationId": "get_digest",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "digest_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Digest Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Digest"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/digests/{digest_id}/stream": {
+      "get": {
+        "tags": [
+          "digests"
+        ],
+        "summary": "Stream Digest",
+        "description": "Server-Sent Events: live narration of one digest agent session.\n\nThis is a RELAY, two streams glued back to back. Upstream, the worker holds the\nAnthropic session event stream and republishes the interesting events as deltas on\nRedis channel digest:{id}. Downstream, this endpoint turns those deltas into SSE.\nThe UI couples to our API only; which vendor runs the agent is the worker's secret.\n\nEvent types, in the order a healthy run emits them:\n  - `snapshot`: the digests row on connect (always first; refresh-proof state).\n  - `status`: the worker created the session, carries session_id for the trace link.\n  - `agent_message` / `tool` / `custom_tool` / `custom_tool_result`: narration,\n    \"what is the agent doing right now\", for a ticker UI.\n  - `done`: terminal verdict (completed/failed), decided by the WORKER after its\n    final row check, because completion is judged by the database (the agent's PUT),\n    never by how the transcript looked. Stream closes on it.\n\nSame refresh-proof choreography as /runs/{run_id}/stream: subscribe FIRST, then\nsnapshot from Postgres, then relay; a client connecting after the run ended gets\nsnapshot + done and closes without ever touching Redis history (there is none,\npub/sub is fire-and-forget; the row is the durable record).",
+        "operationId": "stream_digest",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "digest_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Digest Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/digests/{digest_id}/content": {
+      "put": {
+        "tags": [
+          "digests"
+        ],
+        "summary": "Deliver Digest",
+        "description": "The agent's delivery door. The digest agent calls this from its sandbox with the\nfinished markdown, authenticated by the same vaulted X-API-Key as every data route.\nStoring the content IS what completes the run; the worker watching the session only\nmarks failure if the stream ends and this call never arrived.\n\nPUT because delivery is idempotent by design: re-delivering the same digest (an\nagent retrying a flaky request) just overwrites the row with the same content, no\nduplicate rows, no counter to corrupt.",
+        "operationId": "deliver_digest",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "digest_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Digest Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DigestContent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Digest"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -742,6 +1067,139 @@
           "source_count"
         ],
         "title": "DailyRollup"
+      },
+      "Digest": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "content_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Md"
+          },
+          "word_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Word Count"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "session_id",
+          "content_md",
+          "word_count",
+          "error",
+          "created_at",
+          "completed_at"
+        ],
+        "title": "Digest"
+      },
+      "DigestContent": {
+        "properties": {
+          "content_md": {
+            "type": "string",
+            "title": "Content Md"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content_md"
+        ],
+        "title": "DigestContent"
+      },
+      "DigestCreated": {
+        "properties": {
+          "digest_id": {
+            "type": "integer",
+            "title": "Digest Id"
+          },
+          "base_url": {
+            "type": "string",
+            "title": "Base Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "digest_id",
+          "base_url"
+        ],
+        "title": "DigestCreated"
+      },
+      "DigestTrigger": {
+        "properties": {
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          }
+        },
+        "type": "object",
+        "title": "DigestTrigger"
       },
       "HTTPValidationError": {
         "properties": {
@@ -913,6 +1371,11 @@
           "inserted": {
             "type": "integer",
             "title": "Inserted"
+          },
+          "rated_count": {
+            "type": "integer",
+            "title": "Rated Count",
+            "default": 0
           },
           "error": {
             "anyOf": [
@@ -1233,6 +1696,14 @@
         ],
         "title": "ValidationError"
       }
+    },
+    "securitySchemes": {
+      "APIKeyHeader": {
+        "type": "apiKey",
+        "description": "Required on data routes when the deployment sets SYSDESIGN_API_KEY.",
+        "in": "header",
+        "name": "X-API-Key"
+      }
     }
   },
   "tags": [
@@ -1263,6 +1734,10 @@
     {
       "name": "ratings",
       "description": "Per-signal AI ratings, keyed on content_hash."
+    },
+    {
+      "name": "digests",
+      "description": "Weekly agent-written digests (Module 5). The agent delivers its own result via PUT."
     }
   ]
 }
