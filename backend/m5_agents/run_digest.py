@@ -1,4 +1,9 @@
-"""Data plane for the Module 5 digest agent: start one session, watch it live.
+"""Laptop demo runner for the Module 5 digest agent: start one session, watch it live.
+
+SUPERSEDED for real runs by POST /digests, which enqueues the same logic as a
+Celery task (worker/tasks.py run_digest_session). This script stays as the
+teaching artifact and local debugging loop: same session, same stream, but the
+transcript prints to your terminal and the digest downloads to output/.
 
 The control plane (apply.sh + the YAML files) made the durable objects once.
 This script is the per-run side: create a session pinned to the stored agent
@@ -25,6 +30,10 @@ import sys
 from datetime import date
 from pathlib import Path
 
+# Run as a plain script, `python m5_agents/run_digest.py` puts m5_agents/ on the
+# import path, not backend/. Put backend/ there so common/ imports resolve.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from common.env import load_local_env
 
 load_local_env()  # ANTHROPIC_API_KEY + DATABASE_URL_SUPABASE from backend/.env
@@ -32,8 +41,6 @@ load_local_env()  # ANTHROPIC_API_KEY + DATABASE_URL_SUPABASE from backend/.env
 import os
 
 import anthropic
-import psycopg
-from psycopg.rows import dict_row
 
 HERE = Path(__file__).resolve().parent
 RESOURCES = json.loads((HERE / "resources.json").read_text())
@@ -43,23 +50,12 @@ OUT_DIR = HERE / "output"  # gitignored, downloaded session outputs land here
 # --- the custom tool, executed host-side -----------------------------------------
 
 def get_rated_signals(days: int = 7, min_relevance: float = 0.5) -> str:
-    """The join the API doesn't offer: ratings + their source posts. Runs against
-    Supabase directly with OUR credentials; the agent sees rows, never the DSN."""
-    sql = """
-        SELECT s.payload->>'handle' AS handle,
-               s.payload->>'url' AS url,
-               left(s.payload->>'caption', 200) AS caption,
-               s.captured_at,
-               r.relevance, r.confidence, r.topics, r.summary
-        FROM signal_ratings r
-        JOIN raw_signals s ON s.content_hash = r.content_hash
-        WHERE r.rated_at >= now() - make_interval(days => %s)
-          AND r.relevance >= %s
-        ORDER BY r.relevance DESC, r.rated_at DESC
-        LIMIT 100
-    """
-    with psycopg.connect(os.environ["DATABASE_URL_SUPABASE"]) as conn:
-        rows = conn.cursor(row_factory=dict_row).execute(sql, (days, min_relevance)).fetchall()
+    """The join the API doesn't offer: ratings + their source posts. The query lives in
+    common/digests.py (shared with the worker task); the explicit Supabase DSN is because
+    this laptop's default DATABASE_URL is the local drill db, which has no real ratings."""
+    from common.digests import get_rated_signals as query
+
+    rows = query(days, min_relevance, dsn=os.environ["DATABASE_URL_SUPABASE"])
     return json.dumps(rows, default=str)
 
 

@@ -785,6 +785,211 @@
           }
         }
       }
+    },
+    "/digests": {
+      "post": {
+        "tags": [
+          "digests"
+        ],
+        "summary": "Create Digest",
+        "description": "Kick off one digest agent session. Creates the digests row, enqueues the worker\ntask that babysits the Managed Agent session, and returns immediately with the id,\nthe same 202-style shape as POST /runs. Watch progress with GET /digests/{id}.\n\nThe agent itself completes the run: it PUTs the finished markdown to\n/digests/{id}/content from inside its sandbox. base_url in the body redirects the\nagent at a PR preview deploy; leave it unset in production.",
+        "operationId": "create_digest",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DigestTrigger"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DigestCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "digests"
+        ],
+        "summary": "List Digests",
+        "description": "Recent digests, newest first.",
+        "operationId": "list_digests",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Digest"
+                  },
+                  "title": "Response List Digests"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/digests/{digest_id}": {
+      "get": {
+        "tags": [
+          "digests"
+        ],
+        "summary": "Get Digest",
+        "description": "One digest's current state, content included once the agent has delivered.",
+        "operationId": "get_digest",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "digest_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Digest Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Digest"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/digests/{digest_id}/content": {
+      "put": {
+        "tags": [
+          "digests"
+        ],
+        "summary": "Deliver Digest",
+        "description": "The agent's delivery door. The digest agent calls this from its sandbox with the\nfinished markdown, authenticated by the same vaulted X-API-Key as every data route.\nStoring the content IS what completes the run; the worker watching the session only\nmarks failure if the stream ends and this call never arrived.\n\nPUT because delivery is idempotent by design: re-delivering the same digest (an\nagent retrying a flaky request) just overwrites the row with the same content, no\nduplicate rows, no counter to corrupt.",
+        "operationId": "deliver_digest",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "digest_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Digest Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DigestContent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Digest"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -817,6 +1022,139 @@
           "source_count"
         ],
         "title": "DailyRollup"
+      },
+      "Digest": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "content_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Md"
+          },
+          "word_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Word Count"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "session_id",
+          "content_md",
+          "word_count",
+          "error",
+          "created_at",
+          "completed_at"
+        ],
+        "title": "Digest"
+      },
+      "DigestContent": {
+        "properties": {
+          "content_md": {
+            "type": "string",
+            "title": "Content Md"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content_md"
+        ],
+        "title": "DigestContent"
+      },
+      "DigestCreated": {
+        "properties": {
+          "digest_id": {
+            "type": "integer",
+            "title": "Digest Id"
+          },
+          "base_url": {
+            "type": "string",
+            "title": "Base Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "digest_id",
+          "base_url"
+        ],
+        "title": "DigestCreated"
+      },
+      "DigestTrigger": {
+        "properties": {
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          }
+        },
+        "type": "object",
+        "title": "DigestTrigger"
       },
       "HTTPValidationError": {
         "properties": {
@@ -1351,6 +1689,10 @@
     {
       "name": "ratings",
       "description": "Per-signal AI ratings, keyed on content_hash."
+    },
+    {
+      "name": "digests",
+      "description": "Weekly agent-written digests (Module 5). The agent delivers its own result via PUT."
     }
   ]
 }

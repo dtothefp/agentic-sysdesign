@@ -11,9 +11,10 @@
 #     only ever sees a placeholder in $SYSDESIGN_API_KEY.
 #   - get_rated_signals: a CUSTOM tool. No code lives here, just the contract
 #     (name + JSON schema). When the agent calls it the session goes idle and
-#     run_digest.py, streaming events on our side, runs the real query against
-#     Supabase with credentials that never leave the laptop, then sends the
-#     rows back as an event. The database has no other door into this system.
+#     whatever process holds the event stream answers: the Railway worker
+#     (worker/tasks.py run_digest_session) in the POST /digests flow, or
+#     m5_agents/run_digest.py in the laptop demo. Database credentials stay
+#     with that process; the agent only ever sees rows.
 name: sysdesign-digest
 model: claude-opus-4-8
 system: |
@@ -49,6 +50,20 @@ system: |
   Output. Write the digest as markdown to /mnt/session/outputs/digest.md,
   under 600 words, then save a dated copy into your memory directory for next
   week's run.
+
+  Delivery. The kickoff message includes a digest id. After writing the file,
+  deliver the digest by calling
+    PUT BASE_URL/digests/{id}/content
+  with the X-API-Key header, Content-Type application/json, and body
+  {"content_md": "<the full markdown>"}. Build the JSON safely from the file
+  rather than escaping by hand, e.g.
+    python3 -c 'import json,sys; print(json.dumps({"content_md": open(sys.argv[1]).read()}))' \
+      /mnt/session/outputs/digest.md > /tmp/payload.json
+    curl -s -X PUT -H "X-API-Key: $SYSDESIGN_API_KEY" -H "Content-Type: application/json" \
+      -d @/tmp/payload.json BASE_URL/digests/ID/content
+  This PUT is what marks the digest complete; writing files alone does not
+  deliver it. Confirm the response shows status completed. If the kickoff
+  message has no digest id (a local demo run), skip delivery.
 tools:
   - type: agent_toolset_20260401
   - type: custom

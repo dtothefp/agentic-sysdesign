@@ -18,12 +18,14 @@ survive a page refresh.
 import json
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 
 import psycopg
 import redis
 from psycopg.rows import dict_row
 
 from common.db import DATABASE_URL
+from common.digests import get_rated_signals
 from common.rating import RatingError, default_model, insert_rating, rate_caption
 from common.signals import refresh_rollup
 from worker.celery_app import celery_app
@@ -319,6 +321,151 @@ def sweep_unrated(self, batch: int = 50) -> str:
     for content_hash, handle, caption in rows:
         rate_signal.delay(content_hash, handle, caption, model)
     return f"enqueued {len(rows)}"
+
+
+# --- Module 5: the digest agent session -------------------------------------------
+
+# The Managed Agents object IDs (agent, environment, vault, memory store) created by
+# m5_agents/apply.sh. Committed, not secret; the vault holds the actual secret.
+_M5_RESOURCES = Path(__file__).resolve().parent.parent / "m5_agents" / "resources.json"
+
+
+@celery_app.task(name="worker.tasks.run_digest_session", bind=True)
+def run_digest_session(self, digest_id: int, base_url: str) -> str:
+    """Babysit one Managed Agent session until it delivers a digest (or fails to).
+
+    This is m5_agents/run_digest.py relocated from the laptop into the worker, which is
+    the point: the custom-tool listener is just a process holding the session's event
+    stream, and the worker is a fine place for that process to live. Three channels,
+    never crossing:
+
+      worker -> Anthropic   sessions.create + kickoff (plain POSTs), then the one-way
+                            SSE event stream this task sits on until the session ends.
+      agent  -> our API     the sandbox curls BASE_URL with the vaulted X-API-Key for
+                            data, and DELIVERS the result via PUT /digests/{id}/content.
+                            None of that touches this task.
+      agent  -> this task   the one custom tool, get_rated_signals: the stream announces
+                            the call, this task runs the query with ITS db credentials
+                            and POSTs rows back. Goes away when the tool becomes a plain
+                            endpoint.
+
+    Completion is judged by the DATABASE, not the stream: the agent's PUT flips the row
+    to `completed`. If the stream ends and the row never flipped, the session finished
+    without delivering, and that's a failure no matter how happy the transcript looks."""
+    import anthropic
+
+    resources = json.loads(_M5_RESOURCES.read_text())
+    client = anthropic.Anthropic()
+
+    session = client.beta.sessions.create(
+        agent={
+            "type": "agent",
+            "id": resources["agent_id"],
+            "version": resources["agent_version"],  # pinned: an update mid-run can't change behavior
+        },
+        environment_id=resources["environment_id"],
+        vault_ids=[resources["vault_id"]],
+        title=f"digest {digest_id}",
+        resources=[
+            {
+                "type": "memory_store",
+                "memory_store_id": resources["memory_store_id"],
+                "access": "read_write",
+                "instructions": (
+                    "Previous weekly digests, one dated file per week. Read the most "
+                    "recent one before writing this week's, then save a dated copy of "
+                    "the new digest here."
+                ),
+            }
+        ],
+    )
+
+    with psycopg.connect(DATABASE_URL) as conn:
+        conn.execute(
+            "UPDATE digests SET status = 'running', session_id = %s WHERE id = %s",
+            (session.id, digest_id),
+        )
+        conn.commit()
+
+    error: str | None = None
+    try:
+        # Stream-first: open the SSE stream BEFORE the kickoff so no early event races
+        # past an unattached consumer (same subscribe-before-snapshot discipline as our
+        # own /runs/{id}/stream endpoint).
+        with client.beta.sessions.events.stream(session_id=session.id) as stream:
+            client.beta.sessions.events.send(
+                session_id=session.id,
+                events=[{
+                    "type": "user.message",
+                    "content": [{
+                        "type": "text",
+                        "text": (
+                            f"Write this week's digest. Digest id: {digest_id}. "
+                            f"API base URL: {base_url}"
+                        ),
+                    }],
+                }],
+            )
+
+            for event in stream:
+                if event.type == "agent.custom_tool_use":
+                    # Our one speaking part. Everything else on the stream is narration.
+                    try:
+                        rows = get_rated_signals(**(event.input or {}))
+                        result = json.dumps(rows, default=str)
+                    except Exception as e:  # the agent should hear failures, not hang
+                        result = f"tool error: {e}"
+                    client.beta.sessions.events.send(
+                        session_id=session.id,
+                        events=[{
+                            "type": "user.custom_tool_result",
+                            "custom_tool_use_id": event.id,  # the sevt_ event id, not a toolu_ id
+                            "content": [{"type": "text", "text": result}],
+                        }],
+                    )
+
+                elif event.type == "session.status_idle":
+                    # Idle with requires_action means "waiting on a tool result", keep
+                    # listening. Any other stop_reason (end_turn) is the session done.
+                    if event.stop_reason.type == "requires_action":
+                        continue
+                    break
+
+                elif event.type == "session.status_terminated":
+                    error = "session terminated before finishing"
+                    break
+    except Exception as e:  # noqa: BLE001 (mark the row failed rather than losing the run)
+        error = f"{type(e).__name__}: {e}"
+
+    # The agent's PUT is the completion signal. No PUT by stream end = failed run.
+    with psycopg.connect(DATABASE_URL) as conn:
+        status = conn.execute(
+            "SELECT status FROM digests WHERE id = %s", (digest_id,)
+        ).fetchone()[0]
+        if status != "completed":
+            conn.execute(
+                "UPDATE digests SET status = 'failed', error = %s, completed_at = now() "
+                "WHERE id = %s",
+                (error or "session ended without delivering a digest (no PUT received)",
+                 digest_id),
+            )
+            conn.commit()
+            return "failed"
+    return "completed"
+
+
+def start_digest(base_url: str | None = None) -> dict:
+    """Create the digests row and enqueue the session babysitter. Called by POST /digests.
+    Row-first, same as start_run: the id exists before any work does, so the kickoff
+    message can tell the agent where to deliver."""
+    base = base_url or os.environ.get("SYSDESIGN_PUBLIC_URL", "https://sysdesign.thedefrag.ai")
+    with psycopg.connect(DATABASE_URL) as conn:
+        digest_id = conn.execute(
+            "INSERT INTO digests (status) VALUES ('queued') RETURNING id"
+        ).fetchone()[0]
+        conn.commit()
+    run_digest_session.delay(digest_id, base)
+    return {"digest_id": digest_id, "base_url": base}
 
 
 # --- trigger (called from the API) ---------------------------------------------

@@ -116,3 +116,34 @@ class Rating(BaseModel):
     topics: list[str]
     summary: str
     rated_at: datetime
+
+
+# --- Module 5: agent-written digests ---------------------------------------------
+
+class DigestTrigger(BaseModel):
+    # Override for PR-preview demos, so the agent targets the preview deploy instead of
+    # prod. The worker falls back to SYSDESIGN_PUBLIC_URL, then the prod domain.
+    base_url: str | None = None
+
+
+class DigestCreated(BaseModel):
+    digest_id: int
+    base_url: str  # where the agent was told to call back
+
+
+class DigestContent(BaseModel):
+    content_md: str
+
+
+class Digest(BaseModel):
+    id: int
+    # queued -> running -> completed | failed. `completed` is flipped by the AGENT's
+    # PUT /digests/{id}/content, not by the worker; the worker only flips `failed` when
+    # the session ends without that delivery.
+    status: str
+    session_id: str | None  # joins the row to the Anthropic Console trace
+    content_md: str | None
+    word_count: int | None
+    error: str | None
+    created_at: datetime
+    completed_at: datetime | None

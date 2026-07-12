@@ -34,6 +34,10 @@ from sse_starlette.sse import EventSourceResponse
 
 from api.models import (
     DailyRollup,
+    Digest,
+    DigestContent,
+    DigestCreated,
+    DigestTrigger,
     Influencer,
     InfluencerIn,
     InfluencerWatermark,
@@ -50,7 +54,7 @@ from api.models import (
 from common.db import DATABASE_URL
 from common.rating import resolve_model
 from common.signals import insert_signal
-from worker.tasks import start_run
+from worker.tasks import start_digest, start_run
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
 
@@ -109,6 +113,7 @@ TAGS = [
     {"name": "rollup", "description": "Precomputed daily counts (materialized view)."},
     {"name": "runs", "description": "Background fan-out scrape jobs + live SSE progress."},
     {"name": "ratings", "description": "Per-signal AI ratings, keyed on content_hash."},
+    {"name": "digests", "description": "Weekly agent-written digests (Module 5). The agent delivers its own result via PUT."},
 ]
 
 app = FastAPI(
@@ -434,3 +439,78 @@ def list_ratings(limit: int = Query(50, le=200), min_relevance: float | None = Q
     params.append(limit)
     with pool.connection() as conn:
         return conn.cursor(row_factory=dict_row).execute(sql, params).fetchall()
+
+
+# --- Module 5: agent-written digests ----------------------------------------------
+
+_DIGEST_COLS = "id, status, session_id, content_md, word_count, error, created_at, completed_at"
+
+
+@app.post("/digests", response_model=DigestCreated, tags=["digests"])
+def create_digest(trigger: DigestTrigger):
+    """Kick off one digest agent session. Creates the digests row, enqueues the worker
+    task that babysits the Managed Agent session, and returns immediately with the id,
+    the same 202-style shape as POST /runs. Watch progress with GET /digests/{id}.
+
+    The agent itself completes the run: it PUTs the finished markdown to
+    /digests/{id}/content from inside its sandbox. base_url in the body redirects the
+    agent at a PR preview deploy; leave it unset in production."""
+    return DigestCreated(**start_digest(base_url=trigger.base_url))
+
+
+@app.get("/digests", response_model=list[Digest], tags=["digests"])
+def list_digests(limit: int = Query(20, le=100)):
+    """Recent digests, newest first."""
+    with pool.connection() as conn:
+        return (
+            conn.cursor(row_factory=dict_row)
+            .execute(f"SELECT {_DIGEST_COLS} FROM digests ORDER BY created_at DESC LIMIT %s", (limit,))
+            .fetchall()
+        )
+
+
+@app.get("/digests/{digest_id}", response_model=Digest, tags=["digests"])
+def get_digest(digest_id: int):
+    """One digest's current state, content included once the agent has delivered."""
+    with pool.connection() as conn:
+        row = (
+            conn.cursor(row_factory=dict_row)
+            .execute(f"SELECT {_DIGEST_COLS} FROM digests WHERE id = %s", (digest_id,))
+            .fetchone()
+        )
+    if row is None:
+        raise HTTPException(404, f"digest {digest_id} not found")
+    return row
+
+
+@app.put("/digests/{digest_id}/content", response_model=Digest, tags=["digests"])
+def deliver_digest(digest_id: int, body: DigestContent):
+    """The agent's delivery door. The digest agent calls this from its sandbox with the
+    finished markdown, authenticated by the same vaulted X-API-Key as every data route.
+    Storing the content IS what completes the run; the worker watching the session only
+    marks failure if the stream ends and this call never arrived.
+
+    PUT because delivery is idempotent by design: re-delivering the same digest (an
+    agent retrying a flaky request) just overwrites the row with the same content, no
+    duplicate rows, no counter to corrupt."""
+    with pool.connection() as conn:
+        row = (
+            conn.cursor(row_factory=dict_row)
+            .execute(
+                """
+                UPDATE digests SET
+                  content_md = %s,
+                  word_count = %s,
+                  status = 'completed',
+                  completed_at = now(),
+                  error = NULL
+                WHERE id = %s
+                RETURNING """ + _DIGEST_COLS,
+                (body.content_md, len(body.content_md.split()), digest_id),
+            )
+            .fetchone()
+        )
+        conn.commit()
+    if row is None:
+        raise HTTPException(404, f"digest {digest_id} not found")
+    return row
