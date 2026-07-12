@@ -6,7 +6,7 @@ environment, three services. Postgres is NOT here, it lives on Supabase
 
 | Service | Source | Runs |
 |---|---|---|
-| `api` | GitHub `dtothefp/sysdesign`, root `backend/` | uvicorn via `backend/railway.api.json`, public domain |
+| `api` | GitHub `dtothefp/agentic-sysdesign`, root `backend/` | uvicorn via `backend/railway.api.json`, public domain |
 | `worker` | same repo + root | Celery worker with beat embedded, via `backend/railway.worker.json`, private |
 | `redis` | image `redis:7-alpine` + volume | broker, result backend, SSE pub/sub, private |
 
