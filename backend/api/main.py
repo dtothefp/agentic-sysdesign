@@ -24,7 +24,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 import psycopg
-from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Security
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Security
+from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from fastapi.security.api_key import APIKeyHeader
 from psycopg.rows import dict_row
@@ -36,8 +37,6 @@ from api.models import (
     DailyRollup,
     Digest,
     DigestContent,
-    DigestCreated,
-    DigestTrigger,
     Influencer,
     InfluencerIn,
     InfluencerWatermark,
@@ -51,21 +50,30 @@ from api.models import (
     Source,
     SourceIn,
 )
+from api.mcp_server import mcp as mcp_server
 from common.db import DATABASE_URL
 from common.rating import resolve_model
 from common.signals import insert_signal
-from worker.tasks import start_digest, start_run
+from worker.tasks import start_run
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
 
 pool = ConnectionPool(DATABASE_URL, min_size=1, max_size=10, open=False)
 
+# Build the MCP ASGI app at import time; this is what lazily creates the session manager the
+# lifespan below drives. Mounted at /mcp further down. (Module 5: the digest agent's tool surface.)
+mcp_asgi = mcp_server.streamable_http_app()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    pool.open()
-    yield
-    pool.close()
+    # The co-mounted MCP server needs its StreamableHTTP session manager running for the life of
+    # the app, so nest it around the same pool open/close the API already did. One process, one
+    # lifespan, both surfaces (REST + MCP) share this app's DATABASE_URL.
+    async with mcp_server.session_manager.run():
+        pool.open()
+        yield
+        pool.close()
 
 
 # --- auth (Module 5) -------------------------------------------------------------
@@ -129,6 +137,28 @@ app = FastAPI(
     generate_unique_id_function=_operation_id,
     dependencies=[Depends(require_api_key)],
 )
+
+
+# --- Module 5: the digest agent's MCP tool surface -------------------------------
+#
+# The remote MCP server (api/mcp_server.py) is co-mounted here so the agent can dial
+# get_rated_signals directly, retiring the worker-held custom tool. App-level dependencies
+# (require_api_key) don't run on a mounted sub-app, so the /mcp path gets its own bearer check,
+# same inert-until-keyed SYSDESIGN_API_KEY contract as the REST routes. The vault's static_bearer
+# credential injects that token at egress (m5_agents/apply.sh); the sandbox never sees it.
+
+@app.middleware("http")
+async def _mcp_bearer_auth(request: Request, call_next):
+    if request.url.path.startswith("/mcp"):
+        expected = os.environ.get("SYSDESIGN_API_KEY")
+        if expected:
+            token = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+            if not token or not secrets.compare_digest(token, expected):
+                return JSONResponse({"error": "missing or invalid bearer token"}, status_code=401)
+    return await call_next(request)
+
+
+app.mount("/mcp", mcp_asgi)
 
 
 @app.get("/health", tags=["health"])
@@ -457,16 +487,28 @@ def _read_digest(digest_id: int) -> dict | None:
         )
 
 
-@app.post("/digests", response_model=DigestCreated, tags=["digests"])
-def create_digest(trigger: DigestTrigger = Body(default_factory=DigestTrigger)):
-    """Kick off one digest agent session. Creates the digests row, enqueues the worker
-    task that babysits the Managed Agent session, and returns immediately with the id,
-    the same 202-style shape as POST /runs. Watch progress with GET /digests/{id}.
+# Module 5: POST /digests no longer TRIGGERS a session. A digest run is started by triggering a
+# Managed Agents *deployment* (m5_agents/deploy.py); the API is out of that loop, and so is the
+# Celery worker that used to babysit the session. What POST keeps is one narrow job: mint a
+# pending row and hand back its id. That matters because a manual deployment run replays fixed
+# initial_events (no per-run arguments), so nothing outside the agent can inject a fresh digest
+# id into the kickoff. The agent creates its own row here first, then delivers into it via
+# PUT /digests/{id}/content. Trigger moved out; the row factory stayed, because the delivery
+# door still needs a row to write to.
 
-    The body is optional: a bodyless POST kicks off a prod digest (the worker falls
-    back to SYSDESIGN_PUBLIC_URL, then the prod domain). base_url in the body redirects
-    the agent at a PR preview or local tunnel; leave it unset in production."""
-    return DigestCreated(**start_digest(base_url=trigger.base_url))
+@app.post("/digests", response_model=Digest, tags=["digests"])
+def create_digest() -> dict:
+    """Mint a queued digest row and return it. Not a trigger, a row factory: the digest agent
+    (started by a deployment, m5_agents/deploy.py) calls this as its first step to get an id,
+    writes the digest, then completes the row via PUT /digests/{id}/content."""
+    with pool.connection() as conn:
+        row = (
+            conn.cursor(row_factory=dict_row)
+            .execute("INSERT INTO digests (status) VALUES ('queued') RETURNING " + _DIGEST_COLS)
+            .fetchone()
+        )
+        conn.commit()
+    return row
 
 
 @app.get("/digests", response_model=list[Digest], tags=["digests"])

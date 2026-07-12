@@ -1,24 +1,23 @@
-"""Laptop demo runner for the Module 5 digest agent: start one session, watch it live.
+"""LEGACY teaching artifact: the retired custom-tool pattern for the digest agent.
 
-SUPERSEDED for real runs by POST /digests, which enqueues the same logic as a
-Celery task (worker/tasks.py run_digest_session). This script stays as the
-teaching artifact and local debugging loop: same session, same stream, but the
-transcript prints to your terminal and the digest downloads to output/.
+DOES NOT RUN against the current agent (v4+). It was the TOOL SERVER for a CUSTOM
+get_rated_signals tool: the agent's tool had no code on Anthropic's side, just a
+schema, so when the agent called it the session emitted agent.custom_tool_use and
+went idle, and this process (already holding the SSE stream) ran the query and
+sent the rows back as user.custom_tool_result. Same inversion of control as an SQS
+request/response pair. That's exactly the tether the Module 5 lesson is about: a
+custom tool is bound to whatever process holds the session's event stream, so it
+can't survive an unattended deployment.
 
-The control plane (apply.sh + the YAML files) made the durable objects once.
-This script is the per-run side: create a session pinned to the stored agent
-version, mount the memory store, attach the vault, send one kickoff message,
-and stream the event feed to the terminal.
+The migration retired it. get_rated_signals is now served by the remote MCP server
+co-mounted on the API (backend/api/mcp_server.py), the agent dials it directly, and
+runs are started by triggering a Managed Agents deployment, not by a script that
+babysits the stream. The replacement is m5_agents/deploy.py (create + run + stream,
+read-only). This file stays as the readable before-half of that before/after: the
+custom-tool IoC dance you no longer need. Keep it for the diff, don't run it, agent
+v4 declares no custom tool for it to answer.
 
-It is also the TOOL SERVER. The agent's get_rated_signals tool has no code on
-Anthropic's side, just a schema. When the agent calls it, the session emits
-agent.custom_tool_use and goes idle; this process (already holding the SSE
-stream) runs the real query against Supabase and sends the rows back as a
-user.custom_tool_result event. Database credentials never leave this machine,
-the agent only ever sees result rows. Same inversion of control as an SQS
-request/response pair.
-
-Usage, from backend/:
+Original usage (against agent v3, now superseded):
     uv run python m5_agents/run_digest.py                      # against prod
     uv run python m5_agents/run_digest.py --base-url https://pr-N-....up.railway.app
 """

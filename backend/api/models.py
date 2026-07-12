@@ -119,17 +119,11 @@ class Rating(BaseModel):
 
 
 # --- Module 5: agent-written digests ---------------------------------------------
-
-class DigestTrigger(BaseModel):
-    # Override for PR-preview demos, so the agent targets the preview deploy instead of
-    # prod. The worker falls back to SYSDESIGN_PUBLIC_URL, then the prod domain.
-    base_url: str | None = None
-
-
-class DigestCreated(BaseModel):
-    digest_id: int
-    base_url: str  # where the agent was told to call back
-
+#
+# No trigger model here anymore. A digest run is started by triggering a Managed Agents
+# deployment (m5_agents/deploy.py), not by POSTing a trigger body. The agent creates its
+# own row (POST /digests, no body) and delivers into it (PUT /digests/{id}/content,
+# DigestContent), so the only digest input the API still takes is the delivered markdown.
 
 class DigestContent(BaseModel):
     content_md: str

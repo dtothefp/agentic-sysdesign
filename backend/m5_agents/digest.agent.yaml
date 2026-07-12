@@ -9,12 +9,20 @@
 #     write/edit, glob/grep, web_fetch). The API is reached with plain curl,
 #     authenticated by a vault credential substituted at egress, the sandbox
 #     only ever sees a placeholder in $SYSDESIGN_API_KEY.
-#   - get_rated_signals: a CUSTOM tool. No code lives here, just the contract
-#     (name + JSON schema). When the agent calls it the session goes idle and
-#     whatever process holds the event stream answers: the Railway worker
-#     (worker/tasks.py run_digest_session) in the POST /digests flow, or
-#     m5_agents/run_digest.py in the laptop demo. Database credentials stay
-#     with that process; the agent only ever sees rows.
+#   - get_rated_signals: an MCP tool, served by the remote MCP server co-mounted
+#     on the API at /mcp (backend/api/mcp_server.py). It USED to be a custom tool
+#     answered host-side by whatever process held the event stream, which is why
+#     it couldn't survive an unattended deployment; now the session dials the MCP
+#     server directly through Anthropic's proxy and nothing has to babysit the
+#     stream. The server is declared below under `mcp_servers` (name + URL, no
+#     auth); the vault's static_bearer credential injects the bearer at egress,
+#     keyed to that URL (m5_agents/apply.sh), so the sandbox never sees it.
+#
+# The mcp_servers URL below is the PROD default. A deployment overrides it per
+# tier via agent_with_overrides.mcp_servers (m5_agents/deploy.py), swapping which
+# /mcp the session reaches (local tunnel, preview, prod) without minting a new
+# agent version. The toolset references the server by NAME, so the name stays
+# `sysdesign` across the baked default and every override.
 name: sysdesign-digest
 model: claude-opus-4-8
 system: |
@@ -32,9 +40,16 @@ system: |
   to the request after it leaves your sandbox, this is expected).
 
   GET /ratings returns ratings only, with no creator handle or post URL. To
-  attach handles, URLs, and captions, call the get_rated_signals tool, which
-  joins ratings to their source posts. Use both: the API to see what's there,
-  the tool for the enriched rows the digest needs.
+  attach handles, URLs, and captions, call the get_rated_signals tool (served
+  by an MCP server, already connected), which joins ratings to their source
+  posts. Use both: the API to see what's there, the tool for the enriched rows
+  the digest needs.
+
+  Start your run. Before anything else, create the row you'll deliver into:
+    curl -s -X POST -H "X-API-Key: $SYSDESIGN_API_KEY" BASE_URL/digests
+  This returns a JSON object with an "id". Hold onto that id; you deliver the
+  finished digest into it at the end. (There's no digest id in your kickoff
+  message; you mint your own here.)
 
   The job. The pipeline already rated each post individually. Your work is
   one level up, judgment across posts: identify 3-5 cross-signal themes,
@@ -51,8 +66,8 @@ system: |
   under 600 words, then save a dated copy into your memory directory for next
   week's run.
 
-  Delivery. The kickoff message includes a digest id. After writing the file,
-  deliver the digest by calling
+  Delivery. Use the digest id you minted at the start of the run. After
+  writing the file, deliver the digest by calling
     PUT BASE_URL/digests/{id}/content
   with the X-API-Key header, Content-Type application/json, and body
   {"content_md": "<the full markdown>"}. Build the JSON safely from the file
@@ -62,24 +77,15 @@ system: |
     curl -s -X PUT -H "X-API-Key: $SYSDESIGN_API_KEY" -H "Content-Type: application/json" \
       -d @/tmp/payload.json BASE_URL/digests/ID/content
   This PUT is what marks the digest complete; writing files alone does not
-  deliver it. Confirm the response shows status completed. If the kickoff
-  message has no digest id (a local demo run), skip delivery.
+  deliver it. Confirm the response shows status completed.
+mcp_servers:
+  # PROD default; deployments override the URL per tier (see header comment).
+  # No auth here: the vault's static_bearer credential, keyed to this URL,
+  # injects the bearer at egress (m5_agents/apply.sh).
+  - type: url
+    name: sysdesign
+    url: https://sysdesign.thedefrag.ai/mcp
 tools:
   - type: agent_toolset_20260401
-  - type: custom
-    name: get_rated_signals
-    description: >-
-      Rated Instagram posts joined to their source signals: creator handle,
-      post URL, caption excerpt, captured_at, plus the rating (relevance,
-      confidence, topics, summary). This join is not available from the API.
-      Returns up to 100 rows, highest relevance first.
-    input_schema:
-      type: object
-      properties:
-        days:
-          type: integer
-          description: Look-back window in days (default 7).
-        min_relevance:
-          type: number
-          description: Minimum relevance score 0-1 (default 0.5).
-      required: []
+  - type: mcp_toolset
+    mcp_server_name: sysdesign
