@@ -78,6 +78,10 @@ in one repo that accumulates. Each finished module gets a git tag (`module-1`,
   `/mnt/memory/`, and writes `digests` rows. Pipeline for volume, agent for judgment; the
   per-signal ratings from Module 4 are what the agent reasons over, and the API is its tool
   surface. Requires the Module 3 deploy, already live (the sandbox can't reach localhost).
+  Full control-flow walkthrough (the three channels, vaulted sandbox curl, the fragile
+  worker-side custom tool vs the MCP+deployment target, and the Messages-API-to-Managed-
+  Agents layer cake, with ASCII diagrams of both the current and target flows) in
+  [docs/module-5.md](docs/module-5.md).
 - **Module 6, hybrid search (stretch).** pgvector HNSW + Postgres full-text + Reciprocal
   Rank Fusion over signal content. Upgrades the API's search and becomes a retrieval tool
   the digest agent can call.
