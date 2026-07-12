@@ -792,7 +792,7 @@
           "digests"
         ],
         "summary": "Create Digest",
-        "description": "Kick off one digest agent session. Creates the digests row, enqueues the worker\ntask that babysits the Managed Agent session, and returns immediately with the id,\nthe same 202-style shape as POST /runs. Watch progress with GET /digests/{id}.\n\nThe agent itself completes the run: it PUTs the finished markdown to\n/digests/{id}/content from inside its sandbox. base_url in the body redirects the\nagent at a PR preview deploy; leave it unset in production.",
+        "description": "Kick off one digest agent session. Creates the digests row, enqueues the worker\ntask that babysits the Managed Agent session, and returns immediately with the id,\nthe same 202-style shape as POST /runs. Watch progress with GET /digests/{id}.\n\nThe body is optional: a bodyless POST kicks off a prod digest (the worker falls\nback to SYSDESIGN_PUBLIC_URL, then the prod domain). base_url in the body redirects\nthe agent at a PR preview or local tunnel; leave it unset in production.",
         "operationId": "create_digest",
         "security": [
           {
@@ -800,7 +800,6 @@
           }
         ],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {

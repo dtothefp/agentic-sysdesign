@@ -24,7 +24,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 import psycopg
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Security
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Security
 from fastapi.routing import APIRoute
 from fastapi.security.api_key import APIKeyHeader
 from psycopg.rows import dict_row
@@ -458,14 +458,14 @@ def _read_digest(digest_id: int) -> dict | None:
 
 
 @app.post("/digests", response_model=DigestCreated, tags=["digests"])
-def create_digest(trigger: DigestTrigger):
+def create_digest(trigger: DigestTrigger = Body(default_factory=DigestTrigger)):
     """Kick off one digest agent session. Creates the digests row, enqueues the worker
     task that babysits the Managed Agent session, and returns immediately with the id,
     the same 202-style shape as POST /runs. Watch progress with GET /digests/{id}.
 
-    The agent itself completes the run: it PUTs the finished markdown to
-    /digests/{id}/content from inside its sandbox. base_url in the body redirects the
-    agent at a PR preview deploy; leave it unset in production."""
+    The body is optional: a bodyless POST kicks off a prod digest (the worker falls
+    back to SYSDESIGN_PUBLIC_URL, then the prod domain). base_url in the body redirects
+    the agent at a PR preview or local tunnel; leave it unset in production."""
     return DigestCreated(**start_digest(base_url=trigger.base_url))
 
 
