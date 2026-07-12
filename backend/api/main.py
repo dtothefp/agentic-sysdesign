@@ -446,6 +446,17 @@ def list_ratings(limit: int = Query(50, le=200), min_relevance: float | None = Q
 _DIGEST_COLS = "id, status, session_id, content_md, word_count, error, created_at, completed_at"
 
 
+def _read_digest(digest_id: int) -> dict | None:
+    """One PK lookup for a digest's authoritative state, shared by the GET snapshot and
+    (via asyncio.to_thread) the SSE stream's on-connect snapshot. Same split as _read_run."""
+    with pool.connection() as conn:
+        return (
+            conn.cursor(row_factory=dict_row)
+            .execute(f"SELECT {_DIGEST_COLS} FROM digests WHERE id = %s", (digest_id,))
+            .fetchone()
+        )
+
+
 @app.post("/digests", response_model=DigestCreated, tags=["digests"])
 def create_digest(trigger: DigestTrigger):
     """Kick off one digest agent session. Creates the digests row, enqueues the worker
@@ -472,15 +483,66 @@ def list_digests(limit: int = Query(20, le=100)):
 @app.get("/digests/{digest_id}", response_model=Digest, tags=["digests"])
 def get_digest(digest_id: int):
     """One digest's current state, content included once the agent has delivered."""
-    with pool.connection() as conn:
-        row = (
-            conn.cursor(row_factory=dict_row)
-            .execute(f"SELECT {_DIGEST_COLS} FROM digests WHERE id = %s", (digest_id,))
-            .fetchone()
-        )
+    row = _read_digest(digest_id)
     if row is None:
         raise HTTPException(404, f"digest {digest_id} not found")
     return row
+
+
+@app.get("/digests/{digest_id}/stream", tags=["digests"])
+async def stream_digest(digest_id: int):
+    """Server-Sent Events: live narration of one digest agent session.
+
+    This is a RELAY, two streams glued back to back. Upstream, the worker holds the
+    Anthropic session event stream and republishes the interesting events as deltas on
+    Redis channel digest:{id}. Downstream, this endpoint turns those deltas into SSE.
+    The UI couples to our API only; which vendor runs the agent is the worker's secret.
+
+    Event types, in the order a healthy run emits them:
+      - `snapshot`: the digests row on connect (always first; refresh-proof state).
+      - `status`: the worker created the session, carries session_id for the trace link.
+      - `agent_message` / `tool` / `custom_tool` / `custom_tool_result`: narration,
+        "what is the agent doing right now", for a ticker UI.
+      - `done`: terminal verdict (completed/failed), decided by the WORKER after its
+        final row check, because completion is judged by the database (the agent's PUT),
+        never by how the transcript looked. Stream closes on it.
+
+    Same refresh-proof choreography as /runs/{run_id}/stream: subscribe FIRST, then
+    snapshot from Postgres, then relay; a client connecting after the run ended gets
+    snapshot + done and closes without ever touching Redis history (there is none,
+    pub/sub is fire-and-forget; the row is the durable record)."""
+    channel = f"digest:{digest_id}"
+    _EVENTS = {"status", "agent_message", "tool", "custom_tool", "custom_tool_result", "done"}
+
+    async def gen():
+        r = aioredis.from_url(REDIS_URL)
+        pubsub = r.pubsub()
+        await pubsub.subscribe(channel)  # subscribe before snapshot: no gap
+        try:
+            snapshot = await asyncio.to_thread(_read_digest, digest_id)
+            if snapshot is None:
+                yield {"event": "error",
+                       "data": json.dumps({"error": f"digest {digest_id} not found"})}
+                return
+            snap_json = Digest(**snapshot).model_dump_json()
+            yield {"event": "snapshot", "data": snap_json}
+            if snapshot["status"] in ("completed", "failed"):
+                yield {"event": "done", "data": snap_json}  # already terminal
+                return
+            async for msg in pubsub.listen():
+                if msg["type"] != "message":
+                    continue
+                text = msg["data"].decode() if isinstance(msg["data"], bytes) else msg["data"]
+                mtype = json.loads(text).get("type")
+                yield {"event": mtype if mtype in _EVENTS else "status", "data": text}
+                if mtype == "done":
+                    return
+        finally:
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
+            await r.aclose()
+
+    return EventSourceResponse(gen())
 
 
 @app.put("/digests/{digest_id}/content", response_model=Digest, tags=["digests"])

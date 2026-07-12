@@ -933,6 +933,52 @@
         }
       }
     },
+    "/digests/{digest_id}/stream": {
+      "get": {
+        "tags": [
+          "digests"
+        ],
+        "summary": "Stream Digest",
+        "description": "Server-Sent Events: live narration of one digest agent session.\n\nThis is a RELAY, two streams glued back to back. Upstream, the worker holds the\nAnthropic session event stream and republishes the interesting events as deltas on\nRedis channel digest:{id}. Downstream, this endpoint turns those deltas into SSE.\nThe UI couples to our API only; which vendor runs the agent is the worker's secret.\n\nEvent types, in the order a healthy run emits them:\n  - `snapshot`: the digests row on connect (always first; refresh-proof state).\n  - `status`: the worker created the session, carries session_id for the trace link.\n  - `agent_message` / `tool` / `custom_tool` / `custom_tool_result`: narration,\n    \"what is the agent doing right now\", for a ticker UI.\n  - `done`: terminal verdict (completed/failed), decided by the WORKER after its\n    final row check, because completion is judged by the database (the agent's PUT),\n    never by how the transcript looked. Stream closes on it.\n\nSame refresh-proof choreography as /runs/{run_id}/stream: subscribe FIRST, then\nsnapshot from Postgres, then relay; a client connecting after the run ended gets\nsnapshot + done and closes without ever touching Redis history (there is none,\npub/sub is fire-and-forget; the row is the durable record).",
+        "operationId": "stream_digest",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "digest_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Digest Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/digests/{digest_id}/content": {
       "put": {
         "tags": [

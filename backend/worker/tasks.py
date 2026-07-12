@@ -351,7 +351,14 @@ def run_digest_session(self, digest_id: int, base_url: str) -> str:
 
     Completion is judged by the DATABASE, not the stream: the agent's PUT flips the row
     to `completed`. If the stream ends and the row never flipped, the session finished
-    without delivering, and that's a failure no matter how happy the transcript looks."""
+    without delivering, and that's a failure no matter how happy the transcript looks.
+
+    This task is also a RELAY: each interesting upstream event is republished as a
+    small delta to Redis channel digest:{id}, which GET /digests/{id}/stream turns
+    into SSE for a UI. Downstream clients couple to OUR api, never to Anthropic's
+    stream; swapping the agent vendor later touches this task and nothing else. The
+    worker is the only publisher, and it alone decides when `done` goes out (after
+    the final row check), same single-owner rule as the run stream's fan-in."""
     import anthropic
 
     resources = json.loads(_M5_RESOURCES.read_text())
@@ -387,6 +394,17 @@ def run_digest_session(self, digest_id: int, base_url: str) -> str:
         )
         conn.commit()
 
+    def relay(message: dict) -> None:
+        """Republish one upstream event as a digest:{id} delta. Best-effort: the stream
+        is a live view, the row is the record, so a Redis hiccup must never kill the
+        session babysitter."""
+        try:
+            _redis.publish(f"digest:{digest_id}", json.dumps(message))
+        except Exception:  # noqa: BLE001
+            pass
+
+    relay({"type": "status", "status": "running", "session_id": session.id})
+
     error: str | None = None
     try:
         # Stream-first: open the SSE stream BEFORE the kickoff so no early event races
@@ -408,8 +426,22 @@ def run_digest_session(self, digest_id: int, base_url: str) -> str:
             )
 
             for event in stream:
-                if event.type == "agent.custom_tool_use":
+                if event.type == "agent.message":
+                    # Narration for the UI. Truncated defensively; the full transcript
+                    # lives in the Console trace, this is a progress ticker.
+                    for block in event.content:
+                        if block.type == "text" and block.text.strip():
+                            relay({"type": "agent_message", "text": block.text[:2000]})
+
+                elif event.type == "agent.tool_use":
+                    # Sandbox-side tools (bash, file writes): name only, inputs can
+                    # hold whole file bodies.
+                    relay({"type": "tool", "name": event.name})
+
+                elif event.type == "agent.custom_tool_use":
                     # Our one speaking part. Everything else on the stream is narration.
+                    relay({"type": "custom_tool", "name": event.name,
+                           "input": event.input or {}})
                     try:
                         rows = get_rated_signals(**(event.input or {}))
                         result = json.dumps(rows, default=str)
@@ -423,6 +455,8 @@ def run_digest_session(self, digest_id: int, base_url: str) -> str:
                             "content": [{"type": "text", "text": result}],
                         }],
                     )
+                    relay({"type": "custom_tool_result", "name": event.name,
+                           "bytes": len(result)})
 
                 elif event.type == "session.status_idle":
                     # Idle with requires_action means "waiting on a tool result", keep
@@ -443,14 +477,16 @@ def run_digest_session(self, digest_id: int, base_url: str) -> str:
             "SELECT status FROM digests WHERE id = %s", (digest_id,)
         ).fetchone()[0]
         if status != "completed":
+            error = error or "session ended without delivering a digest (no PUT received)"
             conn.execute(
                 "UPDATE digests SET status = 'failed', error = %s, completed_at = now() "
                 "WHERE id = %s",
-                (error or "session ended without delivering a digest (no PUT received)",
-                 digest_id),
+                (error, digest_id),
             )
             conn.commit()
+            relay({"type": "done", "status": "failed", "error": error})
             return "failed"
+    relay({"type": "done", "status": "completed"})
     return "completed"
 
 
