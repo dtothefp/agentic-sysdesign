@@ -56,6 +56,16 @@ MANIFEST = {
         # requests at egress, so the sandbox never sees it. api-only: the worker never
         # calls the API (it writes the database directly).
         "SYSDESIGN_API_KEY": ("env", "SYSDESIGN_API_KEY"),
+        # Module 5: where the digest agent is told to reach the API. start_digest (which
+        # runs IN this api process, called by POST /digests) resolves the agent's base_url
+        # as: POST-body override -> this var -> code default sysdesign.thedefrag.ai. The
+        # ${{...}} template re-resolves PER ENVIRONMENT: prod gets prod's domain, and any
+        # PR-preview env forked from prod gets ITS OWN preview domain, both covered by the
+        # vault's allowed_hosts (sysdesign.thedefrag.ai + *.up.railway.app). Net effect: a
+        # bodyless POST /digests on any deploy targets that same deploy, so base_url in the
+        # request body is only ever needed for the localhost tunnel (a process that can't
+        # know its own public URL). api-only, same reason as SYSDESIGN_API_KEY above.
+        "SYSDESIGN_PUBLIC_URL": ("literal", "https://${{RAILWAY_PUBLIC_DOMAIN}}"),
     },
     "worker": {
         "DATABASE_URL": ("env", "DATABASE_URL_SUPABASE"),
