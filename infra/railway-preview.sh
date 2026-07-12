@@ -1,10 +1,14 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 # Opt-in PR preview environments for sysdesign, driven by the Railway CLI.
 #
 # Replaces the hand-rolled GraphQL client (railway-preview.py). The CLI wraps the
-# same backboard API but tracks it for us, so an API change becomes a version bump
-# of @railway/cli instead of a code change here. It also resolves services by name,
-# so this script carries no service UUIDs (only the stable project id).
+# same backboard API but Railway tracks it for us, so an API change becomes a
+# version bump of the pinned CLI image instead of a code change here. Services
+# resolve by name, so this script carries no service UUIDs (only the project id).
+#
+# POSIX sh on purpose: the workflow runs it inside the official
+# ghcr.io/railwayapp/cli image (a minimal busybox environment, no bash / jq), and
+# it still runs under bash locally. No bash arrays, no jq, no `pipefail`.
 #
 # Driven by .github/workflows/preview-env.yml: adding the "preview" label to a PR
 # creates a Railway environment pr-<number> cloned from production and pointed at
@@ -18,46 +22,37 @@
 # project-scoped token (RAILWAY_TOKEN) is scoped to one environment, so it can
 # create an environment but cannot retarget or delete it (see infra/README.md).
 # The workspace token fails `railway whoami` (a user-level query) but authorizes
-# project-scoped environment lifecycle, which is all this script does.
-#
-# What "up" does, all idempotent:
-#   1. environment new pr-<n> --duplicate production, unless it already exists.
-#      Duplication copies services, variables, and config (including the shared
-#      Supabase DATABASE_URL, a hazard documented in infra/README.md).
-#   2. environment edit --service-config <svc> source.branch <branch> for api and
-#      worker, so both git-source services track the PR branch. After this, pushes
-#      to the branch auto-deploy to the preview, no Action run needed.
-#   3. domain --service api, which returns the existing railway-provided domain or
-#      generates one (duplication does not copy domains).
-#   4. redeploy each service so the initial preview build runs on the PR branch.
+# the project-scoped environment lifecycle, which is all this script does.
 #
 # Migrations do NOT run in preview environments. railway.api.json scopes the
 # preDeployCommand to production because previews share the production database.
-set -euo pipefail
+set -eu
 
 PROJECT_ID="12dffbd4-65bd-44f7-83b7-d30238c92892"  # sysdesign
 PROD_ENV="production"
 API_SERVICE="api"
 # redis first so the broker is up while worker/api build
-DEPLOY_ORDER=(redis worker api)
+DEPLOY_ORDER="redis worker api"
 
 log() { printf '>> %s\n' "$*" >&2; }
 
 require_token() {
-  if [[ -z "${RAILWAY_API_TOKEN:-}" ]]; then
+  if [ -z "${RAILWAY_API_TOKEN:-}" ]; then
     echo "RAILWAY_API_TOKEN not set. This must be the workspace token (the CLI reads" \
          "it as RAILWAY_API_TOKEN); the project token can't manage environments." >&2
     exit 1
   fi
 }
 
+# True if an environment with the given name exists. Greps the --json name field
+# rather than shelling out to jq, which the CLI container doesn't ship.
 env_exists() {  # $1 = environment name
   railway environment list --json 2>/dev/null \
-    | jq -e --arg n "$1" '.environments[]? | select(.name == $n)' >/dev/null 2>&1
+    | grep -qE "\"name\"[[:space:]]*:[[:space:]]*\"$1\""
 }
 
 cmd_up() {
-  local pr="$1" branch="$2" name="pr-$1" dom
+  pr="$1"; branch="$2"; name="pr-$1"
   require_token
 
   log "linking project $PROJECT_ID ($PROD_ENV) for environment lifecycle"
@@ -81,16 +76,16 @@ cmd_up() {
   railway link --project "$PROJECT_ID" --environment "$name" >/dev/null
 
   log "ensuring api has a railway-provided domain"
+  # works whether the CLI prints json or plain text; just pull the host
   dom="$(railway domain --service "$API_SERVICE" --json 2>/dev/null \
-        | jq -r '.domain // .domains[0].domain // .serviceDomain // empty')"
-  if [[ -z "$dom" ]]; then
-    # fall back to parsing the human output if the json shape differs
+        | grep -oE '[a-z0-9.-]+\.up\.railway\.app' | head -1)"
+  if [ -z "$dom" ]; then
     dom="$(railway domain --service "$API_SERVICE" 2>/dev/null \
           | grep -oE '[a-z0-9.-]+\.up\.railway\.app' | head -1)"
   fi
 
   log "deploying services on $name"
-  for svc in "${DEPLOY_ORDER[@]}"; do
+  for svc in $DEPLOY_ORDER; do
     if railway redeploy --service "$svc" --yes >/dev/null 2>&1; then
       log "redeploy queued: $svc"
     else
@@ -103,7 +98,7 @@ cmd_up() {
 }
 
 cmd_down() {
-  local name="pr-$1"
+  name="pr-$1"
   require_token
   railway link --project "$PROJECT_ID" --environment "$PROD_ENV" >/dev/null 2>&1 || true
   if env_exists "$name"; then
@@ -114,21 +109,17 @@ cmd_down() {
   fi
 }
 
-main() {
-  case "${1:-}" in
-    up)
-      [[ $# -eq 3 ]] || { echo "usage: $0 up <pr> <branch>" >&2; exit 2; }
-      cmd_up "$2" "$3"
-      ;;
-    down)
-      [[ $# -eq 2 ]] || { echo "usage: $0 down <pr>" >&2; exit 2; }
-      cmd_down "$2"
-      ;;
-    *)
-      echo "usage: $0 up <pr> <branch> | down <pr>" >&2
-      exit 2
-      ;;
-  esac
-}
-
-main "$@"
+case "${1:-}" in
+  up)
+    [ "$#" -eq 3 ] || { echo "usage: $0 up <pr> <branch>" >&2; exit 2; }
+    cmd_up "$2" "$3"
+    ;;
+  down)
+    [ "$#" -eq 2 ] || { echo "usage: $0 down <pr>" >&2; exit 2; }
+    cmd_down "$2"
+    ;;
+  *)
+    echo "usage: $0 up <pr> <branch> | down <pr>" >&2
+    exit 2
+    ;;
+esac

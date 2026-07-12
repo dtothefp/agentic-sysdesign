@@ -121,12 +121,18 @@ fires on every PR, with no per-PR or label-based gating (verified against the do
 2026-07-10, only enterprise "Focused PR environments" narrows anything, and by changed
 services, not by PR). So the workflow drives Railway itself, through the Railway CLI
 ([railway-preview.sh](railway-preview.sh)). The CLI wraps the same backboard API but Railway
-maintains it, so an API change is a version bump of `@railway/cli` (pinned in the workflow)
-rather than a code change here, and services resolve by name so the script carries no service
-UUIDs. The command sequence: `environment new pr-<n> --duplicate production`, then
+maintains it, so an API change is a bump of the pinned CLI image rather than a code change
+here, and services resolve by name so the script carries no service UUIDs. The command
+sequence: `environment new pr-<n> --duplicate production`, then
 `environment edit --service-config <svc> source.branch <branch>` for api and worker, then
 `domain --service api` for the preview URL, then `redeploy` per service, and
 `environment delete` on teardown.
+
+The workflow runs the CLI inside Railway's official container image
+(`ghcr.io/railwayapp/cli`, pinned by tag, per Railway's own GitHub Actions guidance) rather
+than installing it, so there's no install step to maintain. The image is minimal (busybox, no
+bash or jq), which is why `railway-preview.sh` is POSIX sh with no jq. The PR-comment step
+runs in a separate job on a normal runner because that image has no `gh`.
 
 The prior hand-rolled GraphQL client is preserved at [railway-preview.py](railway-preview.py)
 until the CLI flow is validated in a live labeled run; it documents the equivalent raw
