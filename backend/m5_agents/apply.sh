@@ -53,6 +53,7 @@ auth:
     allowed_hosts:
       - sysdesign.thedefrag.ai
       - "*.up.railway.app"
+      - sysdesign-local.thedefrag.ai  # Cloudflare tunnel to a laptop dev server (infra/README.md)
   injection_location:
     header: true
 YAML

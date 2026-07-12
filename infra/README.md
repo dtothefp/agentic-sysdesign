@@ -166,3 +166,26 @@ The `preview` GitHub label and the `RAILWAY_WORKSPACE_TOKEN` repo secret were cr
 `gh` (2026-07-10). No Railway dashboard steps were needed. The cloned services reuse the
 existing GitHub connection, so the "token can't connect GitHub repos" constraint never
 bites; connecting the repo happened once for production and clones inherit it.
+
+## Local testing with the Managed Agent (Cloudflare tunnel)
+
+The Module 5 agent's sandbox runs in Anthropic's cloud, so it can't reach `localhost`. To
+test the digest loop against a laptop dev server, a named Cloudflare tunnel publishes the
+local API at a stable hostname the vault credential already allows.
+
+- Hostname: `https://sysdesign-local.thedefrag.ai` -> `localhost:8000` (tunnel
+  `sysdesign-local`, id `dd6113aa-...`, config in `~/.cloudflared/config.yml` on David's
+  machine, created 2026-07-11 via `cloudflared tunnel login` + `create` + `route dns`).
+- The vault credential's `allowed_hosts` includes this hostname, so the agent's
+  `X-API-Key` is substituted toward it exactly like prod. Keep `m5_agents/apply.sh` and
+  the live credential in sync when hosts change.
+- Run it with `cloudflared tunnel run sysdesign-local`. Nothing listens until the local
+  API is up; the tunnel itself only ever holds an OUTBOUND connection to Cloudflare's
+  edge, which is why it works behind NAT with no router config.
+- Full local loop: local api + redis + worker running (dev container), digests migration
+  applied locally, then `POST /digests {"base_url": "https://sysdesign-local.thedefrag.ai"}`
+  against the LOCAL api. The worker babysits the session, the sandbox curls back in
+  through the tunnel, and the digest row completes in the local database.
+- The tunnel exposes the local API to the whole internet, not just Anthropic. Data routes
+  all require `X-API-Key`, which is the thing making that acceptable. Never tunnel an
+  unauthenticated service.
