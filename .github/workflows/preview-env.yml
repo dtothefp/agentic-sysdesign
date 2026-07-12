@@ -7,10 +7,13 @@
 # Remove the label      -> environment deleted.
 # Close or merge the PR -> environment deleted (if it was labeled).
 #
-# Uses the RAILWAY_WORKSPACE_TOKEN repo secret (a workspace token; the
-# project-scoped token can't manage environments, see infra/README.md).
-# Fork PRs don't receive secrets, so this only works for branches in this
-# repo, which is the intended scope.
+# Driven by the Railway CLI (infra/railway-preview.sh), not a hand-rolled API
+# client. The CLI is pinned below; a Railway API change becomes a version bump.
+#
+# Auth is the RAILWAY_WORKSPACE_TOKEN repo secret (a workspace token), passed to
+# the CLI as RAILWAY_API_TOKEN; the project-scoped token can't manage environments
+# (see infra/README.md). Fork PRs don't receive secrets, so this only works for
+# branches in this repo, which is the intended scope.
 
 name: preview-env
 
@@ -21,6 +24,10 @@ on:
 concurrency:
   group: preview-env-${{ github.event.pull_request.number }}
   cancel-in-progress: false
+
+env:
+  # bump this to pick up Railway CLI / API changes
+  RAILWAY_CLI_VERSION: "4.42.1"
 
 jobs:
   up:
@@ -34,14 +41,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Railway CLI
+        run: npm install -g "@railway/cli@${RAILWAY_CLI_VERSION}"
+
       - name: Create or refresh the preview environment
         id: up
         env:
-          RAILWAY_WORKSPACE_TOKEN: ${{ secrets.RAILWAY_WORKSPACE_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_WORKSPACE_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
-          python3 infra/railway-preview.py up "$PR_NUMBER" "$PR_BRANCH" | tee up.log
+          bash infra/railway-preview.sh up "$PR_NUMBER" "$PR_BRANCH" | tee up.log
           grep '^PREVIEW_URL=' up.log >> "$GITHUB_OUTPUT"
 
       - name: Comment the preview URL on the PR
@@ -65,8 +79,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Railway CLI
+        run: npm install -g "@railway/cli@${RAILWAY_CLI_VERSION}"
+
       - name: Delete the preview environment
         env:
-          RAILWAY_WORKSPACE_TOKEN: ${{ secrets.RAILWAY_WORKSPACE_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_WORKSPACE_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: python3 infra/railway-preview.py down "$PR_NUMBER"
+        run: bash infra/railway-preview.sh down "$PR_NUMBER"
