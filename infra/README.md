@@ -6,7 +6,7 @@ environment, three services. Postgres is NOT here, it lives on Supabase
 
 | Service | Source | Runs |
 |---|---|---|
-| `api` | GitHub `dtothefp/sysdesign`, root `backend/` | uvicorn via `backend/railway.api.json`, public domain |
+| `api` | GitHub `dtothefp/agentic-sysdesign`, root `backend/` | uvicorn via `backend/railway.api.json`, public domain |
 | `worker` | same repo + root | Celery worker with beat embedded, via `backend/railway.worker.json`, private |
 | `redis` | image `redis:7-alpine` + volume | broker, result backend, SSE pub/sub, private |
 
@@ -119,11 +119,26 @@ auto-deploy with no Action run, because the cloned deployment triggers track the
 Railway's native "PR environments" feature can't do this. It's a project-level toggle that
 fires on every PR, with no per-PR or label-based gating (verified against the docs
 2026-07-10, only enterprise "Focused PR environments" narrows anything, and by changed
-services, not by PR). So the workflow drives the GraphQL API directly through
-[railway-preview.py](railway-preview.py), which documents the exact mutation sequence
-(environmentCreate with `sourceEnvironmentId` + `skipInitialDeploys`, deploymentTriggerUpdate
-to the PR branch, serviceDomainCreate for the api, serviceInstanceDeployV2 per service,
-environmentDelete on teardown).
+services, not by PR). So the workflow drives Railway itself, through the Railway CLI
+([railway-preview.sh](railway-preview.sh)). The CLI wraps the same backboard API but Railway
+maintains it, so an API change is a bump of the pinned CLI image rather than a code change
+here, and services resolve by name so the script carries no service UUIDs. The command
+sequence: `environment new pr-<n> --duplicate production`, then
+`environment edit --service-config <svc> source.branch <branch>` for api and worker, then
+`domain --service api` for the preview URL, then `redeploy` per service, and
+`environment delete` on teardown.
+
+The workflow runs the CLI inside Railway's official container image
+(`ghcr.io/railwayapp/cli`, pinned by tag, per Railway's own GitHub Actions guidance) rather
+than installing it, so there's no install step to maintain. The image is minimal (busybox, no
+bash or jq), which is why `railway-preview.sh` is POSIX sh with no jq. The PR-comment step
+runs in a separate job on a normal runner because that image has no `gh`.
+
+The prior hand-rolled GraphQL client is preserved at [railway-preview.py](railway-preview.py)
+until the CLI flow is validated in a live labeled run; it documents the equivalent raw
+mutations (`environmentCreate` with `sourceEnvironmentId` + `skipInitialDeploys`,
+`deploymentTriggerUpdate`, `serviceDomainCreate`, `serviceInstanceDeployV2`,
+`environmentDelete`) if the CLI ever needs to be dropped.
 
 ### Token: this needs the WORKSPACE token, not the project token
 
@@ -133,10 +148,13 @@ delete the environment it just created, which is worse than useless (it strands 
 environment only a broader token can remove). Environment management runs on a workspace
 token instead, stored as
 
-- the `RAILWAY_WORKSPACE_TOKEN` repo secret (what the Action uses), and
+- the `RAILWAY_WORKSPACE_TOKEN` repo secret (the workflow feeds it to the CLI as
+  `RAILWAY_API_TOKEN`, the env var the CLI reads for a workspace token), and
 - `RAILWAY_WORKSPACE_TOKEN` in `backend/.env` for local runs of the script.
 
-Rotating it means updating both. `railway-env.py` (env-var sync) stays on the
+The workspace token fails `railway whoami` (that's a user-level query), which is expected;
+it still authorizes the project-scoped environment lifecycle the script uses. Rotating it
+means updating both. `railway-env.py` (env-var sync) stays on the
 narrower project token; only preview create/teardown needs the wide one. Fork PRs never
 receive the secret (GitHub's rule), so previews only work for branches pushed to this repo,
 which is the intended scope.

@@ -7,10 +7,16 @@
 # Remove the label      -> environment deleted.
 # Close or merge the PR -> environment deleted (if it was labeled).
 #
-# Uses the RAILWAY_WORKSPACE_TOKEN repo secret (a workspace token; the
-# project-scoped token can't manage environments, see infra/README.md).
-# Fork PRs don't receive secrets, so this only works for branches in this
-# repo, which is the intended scope.
+# Runs the Railway CLI via Railway's official container image
+# (ghcr.io/railwayapp/cli, pinned below). A Railway API change becomes a bump of
+# the image tag, no code change here. The CLI logic lives in
+# infra/railway-preview.sh (POSIX sh, so it runs in the minimal image).
+#
+# Auth is the RAILWAY_WORKSPACE_TOKEN repo secret (a workspace token), passed to
+# the CLI as RAILWAY_API_TOKEN; the project-scoped token can't manage environments
+# (see infra/README.md). Fork PRs don't receive secrets, so this only works for
+# branches in this repo, which is the intended scope. The PR-comment job runs on a
+# normal runner because the CLI image has no `gh`.
 
 name: preview-env
 
@@ -28,27 +34,34 @@ jobs:
       (github.event.action == 'labeled' && github.event.label.name == 'preview') ||
       (github.event.action == 'reopened' && contains(github.event.pull_request.labels.*.name, 'preview'))
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
+    # bump this tag to pick up Railway CLI / API changes
+    container: ghcr.io/railwayapp/cli:4.50.0
+    outputs:
+      preview_url: ${{ steps.up.outputs.PREVIEW_URL }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Create or refresh the preview environment
         id: up
         env:
-          RAILWAY_WORKSPACE_TOKEN: ${{ secrets.RAILWAY_WORKSPACE_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_WORKSPACE_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
-          python3 infra/railway-preview.py up "$PR_NUMBER" "$PR_BRANCH" | tee up.log
+          sh infra/railway-preview.sh up "$PR_NUMBER" "$PR_BRANCH" | tee up.log
           grep '^PREVIEW_URL=' up.log >> "$GITHUB_OUTPUT"
 
+  comment:
+    needs: up
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
       - name: Comment the preview URL on the PR
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          PREVIEW_URL: ${{ steps.up.outputs.PREVIEW_URL }}
+          PREVIEW_URL: ${{ needs.up.outputs.preview_url }}
         run: |
           {
             echo "Railway preview environment is up: $PREVIEW_URL"
@@ -62,11 +75,12 @@ jobs:
       (github.event.action == 'unlabeled' && github.event.label.name == 'preview') ||
       (github.event.action == 'closed' && contains(github.event.pull_request.labels.*.name, 'preview'))
     runs-on: ubuntu-latest
+    container: ghcr.io/railwayapp/cli:4.50.0
     steps:
       - uses: actions/checkout@v4
 
       - name: Delete the preview environment
         env:
-          RAILWAY_WORKSPACE_TOKEN: ${{ secrets.RAILWAY_WORKSPACE_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_WORKSPACE_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: python3 infra/railway-preview.py down "$PR_NUMBER"
+        run: sh infra/railway-preview.sh down "$PR_NUMBER"
