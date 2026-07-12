@@ -51,6 +51,11 @@ MANIFEST = {
         # it's the worker's default, the API never reads it.
         "GROQ_API_KEY": ("env", "GROQ_API_KEY"),
         "ANTHROPIC_API_KEY": ("env", "ANTHROPIC_API_KEY"),
+        # Module 5: turns on X-API-Key enforcement (api/main.py require_api_key). The same
+        # value lives in the Managed Agents vault, substituted into the digest agent's
+        # requests at egress, so the sandbox never sees it. api-only: the worker never
+        # calls the API (it writes the database directly).
+        "SYSDESIGN_API_KEY": ("env", "SYSDESIGN_API_KEY"),
     },
     "worker": {
         "DATABASE_URL": ("env", "DATABASE_URL_SUPABASE"),

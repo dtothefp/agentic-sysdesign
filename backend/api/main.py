@@ -19,12 +19,14 @@ never blocks the event loop. One pool, opened at startup, closed at shutdown.
 import asyncio
 import json
 import os
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime
 
 import psycopg
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Security
 from fastapi.routing import APIRoute
+from fastapi.security.api_key import APIKeyHeader
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 from redis import asyncio as aioredis
@@ -62,6 +64,36 @@ async def lifespan(app: FastAPI):
     pool.close()
 
 
+# --- auth (Module 5) -------------------------------------------------------------
+#
+# One shared key on the X-API-Key header, enforced by a single app-level dependency.
+# Same inert-until-keyed contract as the rating layer: SYSDESIGN_API_KEY unset means
+# the API is open, set means every route below enforces it. /health stays open
+# (Railway's healthcheck sends no headers). /openapi.json and /docs stay open too,
+# they're Starlette-level routes that app dependencies never run on, and that's the
+# point: the spec is the public discovery surface, and the security scheme declared
+# in it (via Security(APIKeyHeader)) is how a client, or the Module 5 agent reading
+# the spec, learns that data routes want a key.
+#
+# compare_digest instead of == so the check runs in constant time. A plain string
+# compare bails at the first wrong byte, and that timing difference is measurable
+# enough to leak a key byte-by-byte over a network (a timing attack).
+
+API_KEY_HEADER = APIKeyHeader(
+    name="X-API-Key",
+    auto_error=False,  # missing header -> None, we decide (else FastAPI 403s even when unkeyed)
+    description="Required on data routes when the deployment sets SYSDESIGN_API_KEY.",
+)
+
+
+def require_api_key(request: Request, key: str | None = Security(API_KEY_HEADER)) -> None:
+    expected = os.environ.get("SYSDESIGN_API_KEY")
+    if not expected or request.url.path == "/health":
+        return
+    if key is None or not secrets.compare_digest(key, expected):
+        raise HTTPException(401, "missing or invalid X-API-Key")
+
+
 def _operation_id(route: APIRoute) -> str:
     # operationId == handler name, so a generated TypeScript client gets clean method names
     # (listSignals, createSignal) instead of FastAPI's default mangled ones. This is the one
@@ -90,6 +122,7 @@ app = FastAPI(
     openapi_tags=TAGS,
     lifespan=lifespan,
     generate_unique_id_function=_operation_id,
+    dependencies=[Depends(require_api_key)],
 )
 
 

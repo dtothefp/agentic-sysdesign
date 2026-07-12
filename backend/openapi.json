@@ -26,7 +26,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
       }
     },
     "/influencers": {
@@ -51,7 +56,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -90,7 +100,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
       }
     },
     "/influencers/bulk": {
@@ -140,7 +155,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
       }
     },
     "/influencers/{influencer_id}": {
@@ -151,6 +171,11 @@
         "summary": "Update Watermark",
         "description": "Advance the incremental-scrape watermark. The scraper calls this after a run so the\nnext run only pulls posts newer than last_scraped_at.",
         "operationId": "update_watermark",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "influencer_id",
@@ -203,6 +228,11 @@
         ],
         "summary": "List Sources",
         "operationId": "list_sources",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "influencer_id",
@@ -254,6 +284,11 @@
         ],
         "summary": "Create Source",
         "operationId": "create_source",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -296,6 +331,11 @@
         "summary": "Create Signal",
         "description": "Idempotent write. content_hash is derived server-side, so identical payloads dedupe no\nmatter who sends them. Returns inserted=False when the exact signal already existed. The\nactual upsert is common.signals.insert_signal, the same function the Celery worker calls,\nso there's literally one write path.",
         "operationId": "create_signal",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -336,6 +376,11 @@
         "summary": "List Signals",
         "description": "A time window is REQUIRED so the query always carries the partition key and prunes.\nFiltering by influencer alone (no window) would fan out across every partition, so the\nAPI simply doesn't offer that shape.",
         "operationId": "list_signals",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "from",
@@ -425,6 +470,11 @@
         "summary": "Rollup",
         "description": "Reads the precomputed daily_signal_rollup matview, not raw_signals. The dashboard\nnever pays for the aggregate. Refresh happens out of band (make seed / a scheduled job).",
         "operationId": "rollup",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "influencer_id",
@@ -479,6 +529,11 @@
         "summary": "Create Run",
         "description": "Kick off a fan-out scrape. Creates the runs row, enqueues one Celery task per\ninfluencer plus a fan-in callback that refreshes the rollup, and returns the run_id.\nReturns immediately (202-style): the work happens in the worker, watch it on the stream.\n\nAn unknown provider or a missing provider key is rejected HERE with a 400, before any\ntask is enqueued. Fail at the door: a bad model string should never make it into the\nqueue where it would surface as N retry-looping worker tasks instead of one clear error.",
         "operationId": "create_run",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -519,6 +574,11 @@
         "summary": "List Runs",
         "description": "Recent runs, newest first. The dashboard's run history.",
         "operationId": "list_runs",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "limit",
@@ -568,6 +628,11 @@
         "summary": "Get Run",
         "description": "A run's current state, straight from Postgres (the durable record). This is the\nsnapshot a client can read at any time, no stream needed.",
         "operationId": "get_run",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -609,8 +674,13 @@
           "runs"
         ],
         "summary": "Stream Run",
-        "description": "Server-Sent Events: live progress for one run.\n\nThe refresh-proof pattern, in order:\n  1. subscribe to the Redis channel FIRST, so no delta published during step 2 is lost.\n  2. read the runs row from Postgres and send it as the `snapshot` event. A client that\n     connects late, or reconnects after a page refresh, gets the true current state here.\n  3. if the run is already finished, send `done` and close (nothing more will publish).\n  4. otherwise stream each Redis delta as a `progress` event until `done`.\n\nA refresh just reopens this endpoint. There's no per-user registration to lose: the run_id\nin the URL is the whole subscription, and the snapshot re-establishes state every time.",
+        "description": "Server-Sent Events: live progress for one run, across BOTH phases.\n\nThe run lifecycle is queued -> running -> (rating) -> completed/failed, and the stream\nsurfaces it as four event types:\n  - `progress`: one per influencer during the scrape phase.\n  - `scrape_done`: the scrape chord fanned in and the rollup refreshed. If a model is in\n    play the run is now in `rating` (NOT finished), and this is the cue to switch the UI\n    from \"scraping X/N\" to \"rating Y/M\".\n  - `rating`: one per signal rated, carrying rated/rate_total. Decoupled from the scrape\n    chord by design (a slow model never blocks the fan-in), so these arrive after\n    `scrape_done`.\n  - `done`: the run reached a TERMINAL state. The worker owns this decision, it emits\n    `done` at fan-in when there's no rating work, or when the last rating lands. The\n    stream's only job is to relay deltas and close on `done`.\n\nThe refresh-proof pattern, in order:\n  1. subscribe to the Redis channel FIRST, so no delta published during step 2 is lost.\n  2. read the runs row from Postgres and send it as the `snapshot` event. A client that\n     connects late, or reconnects after a page refresh, gets the true current state here.\n  3. if the run is already terminal on connect, send `done` and close.\n  4. otherwise relay deltas and close when a `done` arrives.\n\nA refresh just reopens this endpoint. There's no per-user registration to lose: the run_id\nin the URL is the whole subscription, and the snapshot re-establishes state every time.\n(Reconnecting mid-rating-drain is safe: we subscribe before reading the snapshot, so the\n`done` that ends the rating phase either is already reflected in the snapshot as a terminal\nstatus, or arrives on the channel after we're listening.)",
         "operationId": "stream_run",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -652,6 +722,11 @@
         "summary": "List Ratings",
         "description": "Recent ratings, newest first. min_relevance filters to what the model considered\non-thesis, which is the view the Module 5 digest agent will eventually read.",
         "operationId": "list_ratings",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "limit",
@@ -913,6 +988,11 @@
           "inserted": {
             "type": "integer",
             "title": "Inserted"
+          },
+          "rated_count": {
+            "type": "integer",
+            "title": "Rated Count",
+            "default": 0
           },
           "error": {
             "anyOf": [
@@ -1232,6 +1312,14 @@
           "type"
         ],
         "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "APIKeyHeader": {
+        "type": "apiKey",
+        "description": "Required on data routes when the deployment sets SYSDESIGN_API_KEY.",
+        "in": "header",
+        "name": "X-API-Key"
       }
     }
   },
