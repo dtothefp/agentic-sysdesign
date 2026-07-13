@@ -1,5 +1,6 @@
 """The pydantic edge models: defaults the API relies on and the validation that rejects
 malformed payloads before a handler ever sees them."""
+
 import pytest
 from pydantic import ValidationError
 

@@ -20,6 +20,7 @@ the second time. That one line of SQL is the idempotency contract and the answer
 Run:  uv run python -m common.seed                    # influencers + 4000 synthetic signals
       uv run python -m common.seed --influencers-only  # just the watchlist, no signals
 """
+
 import argparse
 import json
 import random
@@ -33,10 +34,7 @@ from common.hashing import content_hash
 
 # Single source of truth for who we track: the skill's watchlist.json. Fallback keeps the
 # backend runnable if the skill dir isn't present (e.g. a backend-only checkout).
-_WATCHLIST_JSON = (
-    Path(__file__).resolve().parents[2]
-    / ".claude" / "skills" / "scrape-signals" / "watchlist.json"
-)
+_WATCHLIST_JSON = Path(__file__).resolve().parents[2] / ".claude" / "skills" / "scrape-signals" / "watchlist.json"
 _FALLBACK = [{"name": "Example Creator", "instagram_handle": "example_creator"}]
 
 

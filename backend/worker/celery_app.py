@@ -11,6 +11,7 @@ Start a worker from a dev-container terminal with `make worker` (and `make worke
 the periodic refresh backstop). Tasks live in worker.tasks; include= tells Celery to import
 that module on startup so the tasks register.
 """
+
 import os
 
 from celery import Celery
@@ -24,9 +25,9 @@ celery_app = Celery(
 )
 
 celery_app.conf.update(
-    task_track_started=True,        # report a 'started' state, not just pending -> success
-    result_expires=14400,           # drop task results from Redis after 4h (ExtractIQ's value)
-    worker_prefetch_multiplier=1,   # fair fan-out: don't let one worker hoard queued tasks
+    task_track_started=True,  # report a 'started' state, not just pending -> success
+    result_expires=14400,  # drop task results from Redis after 4h (ExtractIQ's value)
+    worker_prefetch_multiplier=1,  # fair fan-out: don't let one worker hoard queued tasks
 )
 
 # Backstop refresh of the rollup. The fan-in step already refreshes after every run, so the

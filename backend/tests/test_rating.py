@@ -1,5 +1,6 @@
 """The rating adapter's pure logic: provider/model resolution (fail-at-the-door validation)
 and the tolerant parser that turns small-model output into a validated rating."""
+
 import pytest
 
 from common.rating import RatingError, _parse_rating, default_model, resolve_model
@@ -62,9 +63,7 @@ def test_parse_rating_strips_fences_and_think_and_clamps():
 
 
 def test_parse_rating_caps_topics_at_five():
-    out = _parse_rating(
-        '{"relevance": 0.5, "confidence": 0.5, "topics": ["a","b","c","d","e","f","g"], "summary": "s"}'
-    )
+    out = _parse_rating('{"relevance": 0.5, "confidence": 0.5, "topics": ["a","b","c","d","e","f","g"], "summary": "s"}')
     assert len(out["topics"]) == 5
 
 

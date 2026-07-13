@@ -16,6 +16,7 @@ is the incremental-scrape watermark, advanced via PATCH after each run.
 Handlers are sync `def`, so FastAPI runs them in a threadpool and the sync psycopg pool
 never blocks the event loop. One pool, opened at startup, closed at shutdown.
 """
+
 import asyncio
 import json
 import os
@@ -147,6 +148,7 @@ app = FastAPI(
 # same inert-until-keyed SYSDESIGN_API_KEY contract as the REST routes. The vault's static_bearer
 # credential injects that token at egress (m5_agents/vault/mcp-bearer.yaml); the sandbox never sees it.
 
+
 @app.middleware("http")
 async def _mcp_bearer_auth(request: Request, call_next):
     if request.url.path.startswith("/mcp"):
@@ -170,15 +172,13 @@ def health() -> dict:
 
 # --- influencers ---------------------------------------------------------------
 
+
 @app.get("/influencers", response_model=list[Influencer], tags=["influencers"])
 def list_influencers():
     with pool.connection() as conn:
         return (
             conn.cursor(row_factory=dict_row)
-            .execute(
-                "SELECT id, name, instagram_handle, last_scraped_at, created_at "
-                "FROM influencers ORDER BY name"
-            )
+            .execute("SELECT id, name, instagram_handle, last_scraped_at, created_at FROM influencers ORDER BY name")
             .fetchall()
         )
 
@@ -239,6 +239,7 @@ def update_watermark(influencer_id: int, w: InfluencerWatermark):
 
 # --- sources -------------------------------------------------------------------
 
+
 @app.get("/sources", response_model=list[Source], tags=["sources"])
 def list_sources(influencer_id: int | None = None):
     sql = "SELECT id, influencer_id, kind, url, created_at FROM sources"
@@ -270,6 +271,7 @@ def create_source(s: SourceIn):
 
 # --- signals -------------------------------------------------------------------
 
+
 @app.post("/signals", response_model=SignalInsertResult, tags=["signals"])
 def create_signal(sig: SignalIn):
     """Idempotent write. content_hash is derived server-side, so identical payloads dedupe no
@@ -278,9 +280,7 @@ def create_signal(sig: SignalIn):
     so there's literally one write path."""
     with pool.connection() as conn:
         try:
-            inserted, h = insert_signal(
-                conn, sig.influencer_id, sig.captured_at, sig.payload, sig.source_id
-            )
+            inserted, h = insert_signal(conn, sig.influencer_id, sig.captured_at, sig.payload, sig.source_id)
         except psycopg.errors.ForeignKeyViolation:
             raise HTTPException(400, f"influencer_id {sig.influencer_id} does not exist") from None
         except psycopg.errors.CheckViolation as e:
@@ -317,6 +317,7 @@ def list_signals(
 
 # --- rollup (materialized view read path) --------------------------------------
 
+
 @app.get("/rollup", response_model=list[DailyRollup], tags=["rollup"])
 def rollup(influencer_id: int | None = None):
     """Reads the precomputed daily_signal_rollup matview, not raw_signals. The dashboard
@@ -333,21 +334,14 @@ def rollup(influencer_id: int | None = None):
 
 # --- runs (Module 2: fan-out jobs + live SSE progress) -------------------------
 
-_RUN_COLS = (
-    "id, status, mode, model, total, done_count, inserted, rated_count, error, "
-    "created_at, started_at, finished_at"
-)
+_RUN_COLS = "id, status, mode, model, total, done_count, inserted, rated_count, error, created_at, started_at, finished_at"
 
 
 def _read_run(run_id: int) -> dict | None:
     """One indexed PK lookup for a run's authoritative state. Used for the GET snapshot and,
     via asyncio.to_thread, for the SSE stream's on-connect snapshot."""
     with pool.connection() as conn:
-        return (
-            conn.cursor(row_factory=dict_row)
-            .execute(f"SELECT {_RUN_COLS} FROM runs WHERE id = %s", (run_id,))
-            .fetchone()
-        )
+        return conn.cursor(row_factory=dict_row).execute(f"SELECT {_RUN_COLS} FROM runs WHERE id = %s", (run_id,)).fetchone()
 
 
 @app.post("/runs", response_model=RunCreated, tags=["runs"])
@@ -456,6 +450,7 @@ async def stream_run(run_id: int):
 
 # --- ratings (Module 4: the AI rating layer's read surface) ---------------------
 
+
 @app.get("/ratings", response_model=list[Rating], tags=["ratings"])
 def list_ratings(limit: int = Query(50, le=200), min_relevance: float | None = Query(None, ge=0, le=1)):
     """Recent ratings, newest first. min_relevance filters to what the model considered
@@ -495,6 +490,7 @@ def _read_digest(digest_id: int) -> dict | None:
 # id into the kickoff. The agent creates its own row here first, then delivers into it via
 # PUT /digests/{id}/content. Trigger moved out; the row factory stayed, because the delivery
 # door still needs a row to write to.
+
 
 @app.post("/digests", response_model=Digest, tags=["digests"])
 def create_digest() -> dict:
@@ -563,8 +559,7 @@ async def stream_digest(digest_id: int):
         try:
             snapshot = await asyncio.to_thread(_read_digest, digest_id)
             if snapshot is None:
-                yield {"event": "error",
-                       "data": json.dumps({"error": f"digest {digest_id} not found"})}
+                yield {"event": "error", "data": json.dumps({"error": f"digest {digest_id} not found"})}
                 return
             snap_json = Digest(**snapshot).model_dump_json()
             yield {"event": "snapshot", "data": snap_json}
@@ -609,7 +604,8 @@ def deliver_digest(digest_id: int, body: DigestContent):
                   completed_at = now(),
                   error = NULL
                 WHERE id = %s
-                RETURNING """ + _DIGEST_COLS,
+                RETURNING """
+                + _DIGEST_COLS,
                 (body.content_md, len(body.content_md.split()), digest_id),
             )
             .fetchone()

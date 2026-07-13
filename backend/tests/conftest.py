@@ -1,5 +1,6 @@
 """Shared fixtures. The unit tests are hermetic (no infra); the integration tests need a
 live Postgres and are auto-skipped when it's unreachable, so `pytest` stays green anywhere."""
+
 import os
 
 import psycopg

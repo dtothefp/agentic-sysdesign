@@ -15,6 +15,7 @@ running total; the items are what the task enqueues rate_signal jobs for, becaus
 rows are new" is knowledge only the writer has at write time (Module 4's rating layer keys
 off exactly this).
 """
+
 import json
 import os
 import time
@@ -62,9 +63,7 @@ def _apify_run(key: str, actor_input: dict) -> list[dict]:
         raise RuntimeError(f"Apify {e.code}: {detail}") from None
 
 
-def scrape_influencer_live(
-    conn: psycopg.Connection, inf: dict, run_ts: str, limit: int
-) -> tuple[int, list[dict]]:
+def scrape_influencer_live(conn: psycopg.Connection, inf: dict, run_ts: str, limit: int) -> tuple[int, list[dict]]:
     """Fetch this influencer's recent posts and upsert each as a signal. Incremental off the
     watermark (first run: newest post only; later runs: posts newer than last_scraped_at),
     then advance the watermark to the run start."""
@@ -109,16 +108,12 @@ def scrape_influencer_live(
     conn.commit()
 
     # advance the watermark so the next run only pulls newer posts
-    conn.execute(
-        "UPDATE influencers SET last_scraped_at = %s WHERE id = %s", (run_ts, inf["id"])
-    )
+    conn.execute("UPDATE influencers SET last_scraped_at = %s WHERE id = %s", (run_ts, inf["id"]))
     conn.commit()
     return inserted, new_items
 
 
-def scrape_influencer_demo(
-    conn: psycopg.Connection, inf: dict, run_ts: str, limit: int
-) -> tuple[int, list[dict]]:
+def scrape_influencer_demo(conn: psycopg.Connection, inf: dict, run_ts: str, limit: int) -> tuple[int, list[dict]]:
     """Insert `limit` synthetic signals for this influencer, one every ~0.4s so the progress
     stream visibly ticks. No Apify call. Each payload is distinct (carries an index) so the
     content_hash differs and the ON CONFLICT upsert actually inserts rather than deduping."""

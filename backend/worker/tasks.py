@@ -15,6 +15,7 @@ The SSE endpoint reads the runs row for a snapshot on connect, then subscribes t
 for these deltas. Durable state (runs table) plus live deltas (Redis) is what makes progress
 survive a page refresh.
 """
+
 import json
 import os
 from datetime import UTC, datetime
@@ -45,10 +46,9 @@ def _publish(run_id: int, message: dict) -> None:
 
 # --- fan-out unit --------------------------------------------------------------
 
+
 @celery_app.task(name="worker.tasks.scrape_influencer", bind=True)
-def scrape_influencer(
-    self, run_id: int, inf: dict, run_ts: str, mode: str, limit: int, model: str | None = None
-) -> dict:
+def scrape_influencer(self, run_id: int, inf: dict, run_ts: str, mode: str, limit: int, model: str | None = None) -> dict:
     """Scrape one influencer, record progress, publish a delta. Never raises: a single
     influencer failing shouldn't sink the whole run or block the chord callback, so errors
     are captured in the return value and still count toward done_count."""
@@ -87,25 +87,27 @@ def scrape_influencer(
         for item in new_items:
             # run_id rides along so the rating task can bump this run's rated_count and publish
             # a `rating` delta, making the (decoupled) rating phase visible on the SSE stream.
-            rate_signal.delay(
-                item["content_hash"], inf["instagram_handle"], item["caption"], rating_model, run_id
-            )
+            rate_signal.delay(item["content_hash"], inf["instagram_handle"], item["caption"], rating_model, run_id)
 
     done, total, run_inserted = row
-    _publish(run_id, {
-        "type": "progress",
-        "run_id": run_id,
-        "influencer": inf["instagram_handle"],
-        "inserted": inserted,
-        "error": error,
-        "done": done,
-        "total": total,
-        "run_inserted": run_inserted,
-    })
+    _publish(
+        run_id,
+        {
+            "type": "progress",
+            "run_id": run_id,
+            "influencer": inf["instagram_handle"],
+            "inserted": inserted,
+            "error": error,
+            "done": done,
+            "total": total,
+            "run_inserted": run_inserted,
+        },
+    )
     return {"handle": inf["instagram_handle"], "inserted": inserted, "error": error}
 
 
 # --- fan-in barrier ------------------------------------------------------------
+
 
 @celery_app.task(name="worker.tasks.finalize_run", bind=True)
 def finalize_run(self, results: list[dict], run_id: int) -> dict:
@@ -139,8 +141,10 @@ def finalize_run(self, results: list[dict], run_id: int) -> dict:
         # finished_at is stamped only on a terminal status; `rating` leaves it NULL until the
         # final rating flips the run to completed.
         has_env = default_model() is not None
-        final = conn.cursor(row_factory=dict_row).execute(
-            """
+        final = (
+            conn.cursor(row_factory=dict_row)
+            .execute(
+                """
             UPDATE runs SET
               status = CASE
                 WHEN %(failed)s THEN 'failed'
@@ -158,8 +162,10 @@ def finalize_run(self, results: list[dict], run_id: int) -> dict:
             WHERE id = %(id)s
             RETURNING done_count, total, inserted, rated_count, status, model
             """,
-            {"failed": failed, "has_env": has_env, "err": err_text, "id": run_id},
-        ).fetchone()
+                {"failed": failed, "has_env": has_env, "err": err_text, "id": run_id},
+            )
+            .fetchone()
+        )
 
     # rate_total is the rating denominator: one rate_signal was enqueued per inserted signal,
     # but only when a model is in play. `scrape_done` marks the end of the scrape phase without
@@ -167,30 +173,32 @@ def finalize_run(self, results: list[dict], run_id: int) -> dict:
     # stream. Some ratings may already be in (rated) by the time the chord fans in.
     rate_total = final["inserted"] if (final["model"] or has_env) else 0
     terminal = final["status"] in ("completed", "failed")
-    _publish(run_id, {
-        "type": "done" if terminal else "scrape_done",
-        "run_id": run_id,
-        "status": final["status"],
-        "error": err_text,
-        "done": final["done_count"],
-        "total": final["total"],
-        "run_inserted": final["inserted"],
-        "rated": final["rated_count"],
-        "rate_total": rate_total,
-    })
+    _publish(
+        run_id,
+        {
+            "type": "done" if terminal else "scrape_done",
+            "run_id": run_id,
+            "status": final["status"],
+            "error": err_text,
+            "done": final["done_count"],
+            "total": final["total"],
+            "run_inserted": final["inserted"],
+            "rated": final["rated_count"],
+            "rate_total": rate_total,
+        },
+    )
     return {"run_id": run_id, "status": final["status"], **final}
 
 
 # --- Module 4: the AI rating stage ----------------------------------------------
+
 
 @celery_app.task(
     name="worker.tasks.rate_signal",
     bind=True,
     max_retries=3,
 )
-def rate_signal(
-    self, content_hash: str, handle: str, caption: str | None, model: str, run_id: int | None = None
-) -> str:
+def rate_signal(self, content_hash: str, handle: str, caption: str | None, model: str, run_id: int | None = None) -> str:
     """Rate one signal's content. Idempotent at both ends: skip if a rating for this hash
     already exists (dedup on the INPUT hash, the model's output is non-deterministic), and
     the insert is ON CONFLICT DO NOTHING for the race where the beat sweep and a scrape
@@ -210,9 +218,7 @@ def rate_signal(
     Manual retry (not autoretry_for) so the give-up path runs our own code, announcing the
     signal instead of letting the task die silently and stranding the run in `rating`."""
     with psycopg.connect(DATABASE_URL) as conn:
-        if conn.execute(
-            "SELECT 1 FROM signal_ratings WHERE content_hash = %s", (content_hash,)
-        ).fetchone():
+        if conn.execute("SELECT 1 FROM signal_ratings WHERE content_hash = %s", (content_hash,)).fetchone():
             _announce_rating(run_id, handle, content_hash)
             return "already-rated"
 
@@ -225,7 +231,7 @@ def rate_signal(
             # no double count) once a model is healthy.
             _announce_rating(run_id, handle, content_hash)
             return f"gave-up: {type(exc).__name__}"
-        raise self.retry(exc=exc, countdown=min(2 ** self.request.retries, 300)) from exc
+        raise self.retry(exc=exc, countdown=min(2**self.request.retries, 300)) from exc
 
     with psycopg.connect(DATABASE_URL) as conn:
         did = insert_rating(conn, content_hash, model, rating)
@@ -270,18 +276,22 @@ def _announce_rating(run_id: int | None, handle: str, content_hash: str) -> None
         return
     rated, inserted, status = row
     terminal = status == "completed"
-    _publish(run_id, {
-        "type": "done" if terminal else "rating",
-        "run_id": run_id,
-        "influencer": handle,
-        "content_hash": content_hash,
-        "rated": rated,
-        "rate_total": inserted,
-        "run_status": status,
-    })
+    _publish(
+        run_id,
+        {
+            "type": "done" if terminal else "rating",
+            "run_id": run_id,
+            "influencer": handle,
+            "content_hash": content_hash,
+            "rated": rated,
+            "rate_total": inserted,
+            "run_status": status,
+        },
+    )
 
 
 # --- periodic backstops ----------------------------------------------------------
+
 
 @celery_app.task(name="worker.tasks.refresh_rollup_task", bind=True)
 def refresh_rollup_task(self) -> str:
@@ -335,6 +345,7 @@ def sweep_unrated(self, batch: int = 50) -> str:
 
 # --- trigger (called from the API) ---------------------------------------------
 
+
 def start_run(mode: str = "live", limit: int = 5, model: str | None = None) -> dict:
     """Create a runs row and enqueue the fan-out chord. Returns the run_id and how many
     influencers it fanned out to. Called by POST /runs in the API process.
@@ -345,9 +356,11 @@ def start_run(mode: str = "live", limit: int = 5, model: str | None = None) -> d
     too, the run scrapes without rating."""
     run_ts = datetime.now(UTC).isoformat()
     with psycopg.connect(DATABASE_URL) as conn:
-        influencers = conn.cursor(row_factory=dict_row).execute(
-            "SELECT id, instagram_handle, last_scraped_at FROM influencers ORDER BY id"
-        ).fetchall()
+        influencers = (
+            conn.cursor(row_factory=dict_row)
+            .execute("SELECT id, instagram_handle, last_scraped_at FROM influencers ORDER BY id")
+            .fetchall()
+        )
         run_id = conn.execute(
             "INSERT INTO runs (status, mode, total, model) VALUES ('queued', %s, %s, %s) RETURNING id",
             (mode, len(influencers), model),
@@ -368,8 +381,6 @@ def start_run(mode: str = "live", limit: int = 5, model: str | None = None) -> d
     # group in the result backend and fires finalize_run once all N have completed.
     from celery import chord
 
-    header = [
-        scrape_influencer.s(run_id, inf, run_ts, mode, limit, model) for inf in payload_infs
-    ]
+    header = [scrape_influencer.s(run_id, inf, run_ts, mode, limit, model) for inf in payload_infs]
     chord(header)(finalize_run.s(run_id))
     return {"run_id": run_id, "total": len(payload_infs), "mode": mode, "model": model}

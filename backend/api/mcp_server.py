@@ -26,6 +26,7 @@ hostname, per-PR *.up.railway.app, the prod domain) and we enforce our own beare
 REST routes). The vault injects that bearer at egress via a static_bearer credential keyed to
 this server's URL (m5_agents/vault/mcp-bearer.yaml); the sandbox never sees the token.
 """
+
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
