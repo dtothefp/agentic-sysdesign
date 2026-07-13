@@ -1,5 +1,6 @@
 """Request and response shapes for the API. Pydantic validates every payload at the edge,
 so handlers only ever see well-formed data."""
+
 from datetime import datetime
 from typing import Any, Literal
 
@@ -68,6 +69,7 @@ class DailyRollup(BaseModel):
 
 # --- Module 2: fan-out runs ----------------------------------------------------
 
+
 class RunTrigger(BaseModel):
     # live = real Apify scrape; demo = synthetic signals, no Apify spend (watch the SSE bar)
     mode: Literal["live", "demo"] = "live"
@@ -108,6 +110,7 @@ class Run(BaseModel):
 
 # --- Module 4: AI ratings -------------------------------------------------------
 
+
 class Rating(BaseModel):
     content_hash: str  # joins to raw_signals.content_hash (dedup key = the model's INPUT)
     model: str
@@ -124,6 +127,7 @@ class Rating(BaseModel):
 # deployment (m5_agents/deployment.yaml), not by POSTing a trigger body. The agent creates its
 # own row (POST /digests, no body) and delivers into it (PUT /digests/{id}/content,
 # DigestContent), so the only digest input the API still takes is the delivered markdown.
+
 
 class DigestContent(BaseModel):
     content_md: str

@@ -22,6 +22,7 @@ response_format {"type": "json_object"} where supported, the schema spelled out 
 system prompt, and strict parse-and-validate on our side. The validator, not the vendor, is
 the contract.
 """
+
 from __future__ import annotations
 
 import json
@@ -41,6 +42,7 @@ try:
     from langsmith import traceable
     from langsmith.run_helpers import get_current_run_tree
 except ImportError:  # pragma: no cover - tracing is optional
+
     def traceable(*d_args: Any, **d_kwargs: Any):  # type: ignore[misc]
         # support both bare @traceable and @traceable(run_type=..., ...)
         if len(d_args) == 1 and callable(d_args[0]) and not d_kwargs:
@@ -49,6 +51,7 @@ except ImportError:  # pragma: no cover - tracing is optional
 
     def get_current_run_tree():  # type: ignore[misc]
         return None
+
 
 # Registry of OpenAI-compatible providers. base_url can be overridden per provider with
 # <PROVIDER>_BASE_URL (the devcontainer sets OLLAMA_BASE_URL=http://ollama:11434/v1).
@@ -90,9 +93,7 @@ def resolve_model(model: str) -> tuple[str, str, str, str | None]:
     """
     provider, sep, model_name = model.partition("/")
     if not sep or not model_name or provider not in PROVIDERS:
-        raise ValueError(
-            f"model must be 'provider/model' with provider one of {sorted(PROVIDERS)}, got {model!r}"
-        )
+        raise ValueError(f"model must be 'provider/model' with provider one of {sorted(PROVIDERS)}, got {model!r}")
     cfg = PROVIDERS[provider]
     base_url = os.environ.get(f"{provider.upper()}_BASE_URL", cfg["base_url"]).rstrip("/")
     api_key = os.environ.get(cfg["key_env"]) if cfg["key_env"] else None
@@ -151,9 +152,7 @@ def _chat_completion(messages: list[dict[str, str]], model: str, timeout: int = 
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    req = urllib.request.Request(
-        f"{base_url}/chat/completions", data=json.dumps(body).encode(), headers=headers, method="POST"
-    )
+    req = urllib.request.Request(f"{base_url}/chat/completions", data=json.dumps(body).encode(), headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             resp = json.load(r)
@@ -201,13 +200,15 @@ def _record_usage(usage: dict[str, Any] | None, provider: str, model_name: str) 
     run.add_metadata({"provider": provider, "ls_model_name": model_name})
     if not usage:
         return
-    run.add_outputs({
-        "usage_metadata": {
-            "input_tokens": usage.get("prompt_tokens", 0),
-            "output_tokens": usage.get("completion_tokens", 0),
-            "total_tokens": usage.get("total_tokens", 0),
+    run.add_outputs(
+        {
+            "usage_metadata": {
+                "input_tokens": usage.get("prompt_tokens", 0),
+                "output_tokens": usage.get("completion_tokens", 0),
+                "total_tokens": usage.get("total_tokens", 0),
+            }
         }
-    })
+    )
 
 
 def insert_rating(conn, content_hash: str, model: str, rating: dict[str, Any]) -> bool:

@@ -9,6 +9,7 @@ never disagree with itself no matter who inserts it.
 refresh_rollup lives here too because it's the write-side counterpart: after signals land,
 the materialized view has to be recomputed, and the fan-in step of a run calls it.
 """
+
 from datetime import datetime
 from typing import Any
 

@@ -151,6 +151,8 @@ make worker      # DEV CONTAINER: Celery worker for Module 2 fan-out jobs (needs
 make worker-beat # DEV CONTAINER: Celery beat, periodic backstops (rollup refresh + unrated sweep)
 make ollama-pull # DEV CONTAINER: one-time pull of the Module 4 local rating model (llama3.2:1b)
 make openapi     # export the OpenAPI spec to backend/openapi.json (no db/server needed)
+make lint        # ruff check over the backend (config in pyproject.toml)
+make test        # pytest (backend/tests); integration tests auto-skip when Postgres is down
 make down        # drop the volume
 make reset       # down then setup
 uv run python -m common.seed   # re-seed (idempotent, inserts nothing the second time)
@@ -208,3 +210,39 @@ twice" and "how do you avoid duplicates" probes.
 
 No em dashes or en dashes as punctuation. Use commas, parens, periods. No prose colons
 introducing a list in body text. Use contractions.
+
+## Cursor Cloud specific instructions
+
+The Cloud VM runs the stack natively (no Docker, no `.devcontainer/compose.yml`). Postgres 16
++ pgvector, Redis, `uv`, and `dbmate` are baked into the VM image, and the code's env defaults
+(`DATABASE_URL=postgresql://lab:lab@localhost:5432/sysdesign`, `REDIS_URL=redis://localhost:6379`,
+Celery on the same Redis) already point at localhost, so no `.env` or exported URLs are needed
+for local dev. The `lab` Postgres role is a superuser (so migrations can `CREATE EXTENSION vector`).
+
+Postgres and Redis are system services that do NOT auto-start on boot. Start them once per session
+before running anything (the seeded `sysdesign` db persists in the image, so you usually don't need
+to re-seed):
+
+```bash
+sudo pg_ctlcluster 16 main start
+sudo redis-server /etc/redis/redis.conf --daemonize yes
+```
+
+Then run services from `backend/`, each in its own terminal, per the `make` targets already
+documented above (`make api` on :8000, `make worker`, optional `make worker-beat`). The DB is
+already migrated and seeded (5 influencers + 4000 drill signals); use `make migrate`/`make seed`
+or `make db-fresh` only if you dropped or emptied it. The fastest end-to-end smoke test is a demo
+run (no external keys, no Apify spend), which exercises the Celery chord fan-out and the SSE stream:
+`curl -X POST localhost:8000/runs -d '{"mode":"demo","limit":5}'`, then watch
+`curl -N localhost:8000/runs/<run_id>/stream`.
+
+Lint with `make lint` (ruff `check` plus `ruff format --check`, config in `pyproject.toml`);
+`make format` auto-applies the formatter. Tests are `make test` (pytest under `backend/tests/`):
+unit tests are hermetic, and tests marked `integration` need a live Postgres and auto-skip when
+it's unreachable, so `make test` is green even with no DB up (start Postgres first to actually
+exercise them). Lint, format check, and tests all run in CI (`.github/workflows/ci.yml`) on every
+PR and on merge to main, so run `make format` and `make lint` before pushing. "Build" for the backend is `uv sync` plus `make openapi` (spec
+export). The Module 4
+rating layer stays inert unless `RATING_MODEL` and a model are provided; local Ollama is a
+`.devcontainer` sibling that is not installed on the Cloud VM, so demo runs finish with
+`rated_count = 0`, which is expected. The empty `frontend/` has no UI to run yet.

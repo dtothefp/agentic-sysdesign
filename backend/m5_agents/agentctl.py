@@ -38,6 +38,7 @@ credential, is created lazily on deploy for any /mcp URL that doesn't have one.
 The MCP bearer + API key secret both come from $SYSDESIGN_API_KEY (a CI secret),
 injected at apply time, never committed.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,7 +46,7 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
@@ -83,6 +84,7 @@ TRACE = "https://platform.claude.com/workspaces/default/sessions/{sid}"
 
 
 # --- `ant` plumbing --------------------------------------------------------------
+
 
 class AntError(RuntimeError):
     def __init__(self, args: list[str], stdout: str, stderr: str):
@@ -140,6 +142,7 @@ def require_secret() -> str:
 
 # --- naming ----------------------------------------------------------------------
 
+
 def _suffix(tier: str, branch: str | None, pr: int | None) -> str:
     if tier == "prod":
         return "prod"
@@ -174,7 +177,7 @@ def build_metadata(tier: str, base_url: str, branch, pr, sha) -> dict:
     meta = {
         "tier": tier,
         "base_url": base_url,
-        "deployed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "deployed_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     if branch:
         meta["branch"] = branch
@@ -186,6 +189,7 @@ def build_metadata(tier: str, base_url: str, branch, pr, sha) -> dict:
 
 
 # --- find-by-name ----------------------------------------------------------------
+
 
 def find_agent(name: str) -> dict | None:
     return next((a for a in ant_list(["beta:agents"]) if a.get("name") == name), None)
@@ -207,6 +211,7 @@ def find_mcp_credential(mcp_url: str) -> dict | None:
 
 # --- upserts ---------------------------------------------------------------------
 
+
 def ensure_mcp_credential(base_url: str, meta: dict) -> str:
     """A static_bearer is keyed to one exact /mcp URL and can't wildcard, so each
     tier's URL needs its own credential. Create it if this URL doesn't have one.
@@ -223,13 +228,20 @@ def ensure_mcp_credential(base_url: str, meta: dict) -> str:
     # `--auth` and `--metadata` each take one JSON/YAML mapping (not repeated
     # key=value pairs). Metadata values are stored as strings.
     auth = {"type": "static_bearer", "mcp_server_url": f"{base_url}/mcp", "token": token}
-    res = ant_json([
-        "beta:vaults:credentials", "create",
-        "--vault-id", VAULT_ID,
-        "--display-name", display,
-        "--auth", json.dumps(auth),
-        "--metadata", json.dumps({k: str(v) for k, v in meta.items()}),
-    ])
+    res = ant_json(
+        [
+            "beta:vaults:credentials",
+            "create",
+            "--vault-id",
+            VAULT_ID,
+            "--display-name",
+            display,
+            "--auth",
+            json.dumps(auth),
+            "--metadata",
+            json.dumps({k: str(v) for k, v in meta.items()}),
+        ]
+    )
     print(f"  vault: created MCP bearer for {base_url}/mcp -> {res['id']}")
     return res["id"]
 
@@ -253,18 +265,27 @@ def upsert_agent(name: str, base_url: str, meta: dict) -> tuple[str, int]:
     existing = find_agent(name)
     if existing:
         current = ant_json(["beta:agents", "retrieve", "--agent-id", existing["id"]])
-        res = ant_json([
-            "beta:agents", "update",
-            "--agent-id", existing["id"], "--version", str(current["version"]),
-            "--name", name, "--model", model_cfg, "--system", cfg["system"],
-            "--metadata", meta_json,
-        ])
+        res = ant_json(
+            [
+                "beta:agents",
+                "update",
+                "--agent-id",
+                existing["id"],
+                "--version",
+                str(current["version"]),
+                "--name",
+                name,
+                "--model",
+                model_cfg,
+                "--system",
+                cfg["system"],
+                "--metadata",
+                meta_json,
+            ]
+        )
         print(f"  agent: updated {name} -> {res['id']} v{res['version']}")
     else:
-        servers = [
-            {**s, "url": f"{base_url}/mcp"} if s.get("name") == "sysdesign" else s
-            for s in cfg["mcp_servers"]
-        ]
+        servers = [{**s, "url": f"{base_url}/mcp"} if s.get("name") == "sysdesign" else s for s in cfg["mcp_servers"]]
         body: list[str] = ["--name", name, "--model", model_cfg, "--system", cfg["system"]]
         for tool in cfg["tools"]:
             body += ["--tool", json.dumps(tool)]
@@ -276,8 +297,7 @@ def upsert_agent(name: str, base_url: str, meta: dict) -> tuple[str, int]:
     return res["id"], res["version"]
 
 
-def upsert_deployment(tier: str, name: str, agent_id: str, agent_version: int,
-                      base_url: str, meta: dict) -> str:
+def upsert_deployment(tier: str, name: str, agent_id: str, agent_version: int, base_url: str, meta: dict) -> str:
     """Create (or update) the named deployment pinning the agent, with the kickoff
     initial_event carrying this tier's base URL. Prod alone mounts the memory
     store (read_write); preview/local omit it so they never pollute prod memory."""
@@ -291,29 +311,48 @@ def upsert_deployment(tier: str, name: str, agent_id: str, agent_version: int,
         # memory resource are invariant per named deployment, so they're preserved
         # by omission (which also sidesteps the update flags' JSON-typing quirk,
         # e.g. `--vault-id` wants an array on update, not a bare id).
-        res = ant_json([
-            "beta:deployments", "update", "--deployment-id", existing["id"],
-            "--name", name, "--agent", agent_id, "--metadata", meta_json,
-        ])
+        res = ant_json(
+            [
+                "beta:deployments",
+                "update",
+                "--deployment-id",
+                existing["id"],
+                "--name",
+                name,
+                "--agent",
+                agent_id,
+                "--metadata",
+                meta_json,
+            ]
+        )
         print(f"  deployment: updated {name} -> {res['id']}")
         return res["id"]
 
     kickoff = dep["kickoff"].replace("{{BASE_URL}}", base_url).strip()
     args: list[str] = [
-        "--name", name,
-        "--agent", agent_id,  # id string pins latest, which is the version just minted
-        "--environment-id", ENV_ID,
-        "--vault-id", VAULT_ID,
-        "--initial-event", json.dumps({"type": "user.message",
-                                       "content": [{"type": "text", "text": kickoff}]}),
+        "--name",
+        name,
+        "--agent",
+        agent_id,  # id string pins latest, which is the version just minted
+        "--environment-id",
+        ENV_ID,
+        "--vault-id",
+        VAULT_ID,
+        "--initial-event",
+        json.dumps({"type": "user.message", "content": [{"type": "text", "text": kickoff}]}),
     ]
     if tier == "prod":
-        args += ["--resource", json.dumps({
-            "type": "memory_store",
-            "memory_store_id": MEMORY_ID,
-            "access": "read_write",
-            "instructions": dep["memory_instructions"].strip(),
-        })]
+        args += [
+            "--resource",
+            json.dumps(
+                {
+                    "type": "memory_store",
+                    "memory_store_id": MEMORY_ID,
+                    "access": "read_write",
+                    "instructions": dep["memory_instructions"].strip(),
+                }
+            ),
+        ]
     args += ["--metadata", meta_json]
     res = ant_json(["beta:deployments", "create", *args])
     print(f"  deployment: created {name} -> {res['id']}")
@@ -321,6 +360,7 @@ def upsert_deployment(tier: str, name: str, agent_id: str, agent_version: int,
 
 
 # --- commands --------------------------------------------------------------------
+
 
 def cmd_deploy(a: argparse.Namespace) -> None:
     base_url = resolve_base_url(a.tier, a.base_url)
@@ -386,11 +426,11 @@ def cmd_list(_a: argparse.Namespace) -> None:
     print("AGENTS")
     for a in sorted(agents, key=lambda x: x.get("name", "")):
         m = a.get("metadata") or {}
-        print(f"  {a.get('name'):40} v{a.get('version'):<3} tier={m.get('tier','?'):8} {a.get('id')}")
+        print(f"  {a.get('name'):40} v{a.get('version'):<3} tier={m.get('tier', '?'):8} {a.get('id')}")
     print("DEPLOYMENTS")
     for d in sorted(deploys, key=lambda x: x.get("name", "")):
         m = d.get("metadata") or {}
-        print(f"  {d.get('name'):40} tier={m.get('tier','?'):8} agent_v{m.get('agent_version','?'):<3} {d.get('id')}")
+        print(f"  {d.get('name'):40} tier={m.get('tier', '?'):8} agent_v{m.get('agent_version', '?'):<3} {d.get('id')}")
 
 
 def main() -> None:

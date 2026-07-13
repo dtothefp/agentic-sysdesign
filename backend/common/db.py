@@ -1,4 +1,5 @@
 """Connection helper shared by every module. One env var, one place to read it."""
+
 import os
 
 # Every process (API and worker) imports this module, so it's the one chokepoint to teach
@@ -9,6 +10,4 @@ from common.env import load_local_env
 
 load_local_env()
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL", "postgresql://lab:lab@localhost:5432/sysdesign"
-)
+DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://lab:lab@localhost:5432/sysdesign")

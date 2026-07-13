@@ -15,6 +15,7 @@ Deliberately a hand-rolled parser, not python-dotenv, to keep the dependency lis
 match the raw-urllib / raw-SQL spirit of the rest of the backend. It handles KEY=VALUE, skips
 blanks and # comments, and strips an optional surrounding pair of quotes.
 """
+
 from __future__ import annotations
 
 import os

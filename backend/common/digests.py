@@ -11,6 +11,7 @@ and the custom-tool plumbing goes away; this function outlives all of those door
 No FK backs the join. content_hash is the by-convention key between signal_ratings
 and the partitioned raw_signals (same reason as in the Module 4 migration notes).
 """
+
 import psycopg
 from psycopg.rows import dict_row
 
@@ -31,9 +32,7 @@ _SQL = """
 """
 
 
-def get_rated_signals(
-    days: int = 7, min_relevance: float = 0.5, dsn: str | None = None
-) -> list[dict]:
+def get_rated_signals(days: int = 7, min_relevance: float = 0.5, dsn: str | None = None) -> list[dict]:
     """Rated posts joined to their source signals, best first, capped at 100.
 
     dsn overrides the connection target; the default (DATABASE_URL) is right wherever
@@ -41,8 +40,4 @@ def get_rated_signals(
     laptop runner passes DATABASE_URL_SUPABASE explicitly because its local default
     points at the drill database, which has no real ratings."""
     with psycopg.connect(dsn or DATABASE_URL) as conn:
-        return (
-            conn.cursor(row_factory=dict_row)
-            .execute(_SQL, (days, min_relevance))
-            .fetchall()
-        )
+        return conn.cursor(row_factory=dict_row).execute(_SQL, (days, min_relevance)).fetchall()

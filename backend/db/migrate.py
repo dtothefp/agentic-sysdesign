@@ -16,6 +16,7 @@ between `-- migrate:up` and `-- migrate:down`, and a `transaction:false` suffix 
 CONCURRENTLY` and friends). A `transaction:false` migration must be a single statement so
 Postgres doesn't wrap it in an implicit transaction block.
 """
+
 from __future__ import annotations
 
 import os
@@ -63,9 +64,7 @@ def main() -> int:
         return 0
 
     with psycopg.connect(url, autocommit=True) as conn:
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS schema_migrations (version varchar(255) PRIMARY KEY)"
-        )
+        conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version varchar(255) PRIMARY KEY)")
         applied = {v for (v,) in conn.execute("SELECT version FROM schema_migrations").fetchall()}
         pending = [f for f in files if version_of(f) not in applied]
 
