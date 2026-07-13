@@ -208,3 +208,34 @@ twice" and "how do you avoid duplicates" probes.
 
 No em dashes or en dashes as punctuation. Use commas, parens, periods. No prose colons
 introducing a list in body text. Use contractions.
+
+## Cursor Cloud specific instructions
+
+The Cloud VM runs the stack natively (no Docker, no `.devcontainer/compose.yml`). Postgres 16
++ pgvector, Redis, `uv`, and `dbmate` are baked into the VM image, and the code's env defaults
+(`DATABASE_URL=postgresql://lab:lab@localhost:5432/sysdesign`, `REDIS_URL=redis://localhost:6379`,
+Celery on the same Redis) already point at localhost, so no `.env` or exported URLs are needed
+for local dev. The `lab` Postgres role is a superuser (so migrations can `CREATE EXTENSION vector`).
+
+Postgres and Redis are system services that do NOT auto-start on boot. Start them once per session
+before running anything (the seeded `sysdesign` db persists in the image, so you usually don't need
+to re-seed):
+
+```bash
+sudo pg_ctlcluster 16 main start
+sudo redis-server /etc/redis/redis.conf --daemonize yes
+```
+
+Then run services from `backend/`, each in its own terminal, per the `make` targets already
+documented above (`make api` on :8000, `make worker`, optional `make worker-beat`). The DB is
+already migrated and seeded (5 influencers + 4000 drill signals); use `make migrate`/`make seed`
+or `make db-fresh` only if you dropped or emptied it. The fastest end-to-end smoke test is a demo
+run (no external keys, no Apify spend), which exercises the Celery chord fan-out and the SSE stream:
+`curl -X POST localhost:8000/runs -d '{"mode":"demo","limit":5}'`, then watch
+`curl -N localhost:8000/runs/<run_id>/stream`.
+
+There are no automated tests and no lint/format tooling configured in this repo (no pytest, ruff,
+mypy, etc.). "Build" for the backend is `uv sync` plus `make openapi` (spec export). The Module 4
+rating layer stays inert unless `RATING_MODEL` and a model are provided; local Ollama is a
+`.devcontainer` sibling that is not installed on the Cloud VM, so demo runs finish with
+`rated_count = 0`, which is expected. The empty `frontend/` has no UI to run yet.
