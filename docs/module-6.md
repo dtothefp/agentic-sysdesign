@@ -317,3 +317,63 @@ decision via one shared `embed_query` function, so there's exactly one place tha
   LLM call it saves."
 - "The whole semantic layer is inert until an embedding model is configured. With none, search
   degrades to keyword-only and says so in the response."
+
+---
+
+## Appendix: clustering the digest (the embeddings' third job)
+
+Search is retrieval, query in, posts out. The Module 5 digest bot doesn't do retrieval, it does
+*discovery*, it reads the week's rated posts and groups them into themes bottom-up. So plain search
+doesn't help it. But the *embeddings* built for search do, in a different way. Embeddings have two
+uses, and search only exercises one:
+
+```
+   RETRIEVAL:  query in  -> nearest posts out    (needs an external question; the digest has none)
+   CLUSTERING: posts in  -> groups out           (no question; this IS what the digest does)
+```
+
+Today the digest bot clusters *inside the model*. It reads the flat `get_rated_signals` list and
+groups the posts itself. That works only while the week's posts fit the context window and don't
+bury the signal in noise. It's the model doing mechanical grouping, which is the part that doesn't
+scale as volume grows.
+
+The fix reuses the same vectors to group the posts *in the pipeline* before the model sees them.
+`get_signal_clusters` (in `common/clusters.py`, surfaced as an MCP tool and `GET /signal-clusters`)
+pulls the week's rated-and-embedded posts and greedily clusters them by cosine distance, then
+returns themes instead of raw posts. The model reasons over ~15 themes regardless of whether 100 or
+10,000 posts sat underneath.
+
+```
+   BEFORE:  get_rated_signals -> [hundreds of raw posts] -> model groups + names + judges
+                                                             ^ model does the mechanical grouping
+
+   AFTER:   get_signal_clusters -> [~15 themes]          -> model names + judges only
+              each theme = {representative post, size, avg_relevance, topics, members}
+              ^ grouping done in the DB. fits at any volume; themes grow slower than posts
+```
+
+This is the Module 5 thesis, "pipeline for volume, agent for judgment," made literal. Grouping is
+mechanical (pipeline), naming a theme and calling it a trend is judgment (agent).
+
+Two design points worth defending:
+
+- **Themes are emergent, not predefined.** There's no category list. Each call groups *this* week's
+  posts by proximity, so a week full of voice-agent posts produces a big voice-agents theme on its
+  own. The distance threshold (default 0.35 cosine, looser than the cache's 0.05 because a theme is
+  broader than a duplicate) is the only knob.
+- **Greedy threshold, exact distances.** We seed on the highest-relevance unassigned post, absorb
+  everything within threshold, repeat. No `k` to pick, no `numpy`/`sklearn`, and the seed rule makes
+  the representative the strongest post. And unlike search we compute *exact* cosine here, not the
+  approximate HNSW, because clustering runs over the small weekly working set where correct grouping
+  beats index speed. Like RRF, the clustering core (`cosine_distance`, `greedy_cluster`) is a pure
+  function, unit-tested with no database.
+
+**Two tools, two directions.** `get_signal_clusters` is the overview (themes, cheap, scales).
+`get_rated_signals` stays as the drill-down (the flat enriched rows for a theme's posts). The agent
+gets the themes first, then pulls detail on the two or three posts it wants to highlight. Same
+inert-until-keyed contract as search, when no embeddings back the window, `get_signal_clusters`
+returns `"clustered": false` and the agent falls back to grouping the flat list by hand.
+
+The soundbite. "Embeddings do two jobs, retrieval and clustering. My digest doesn't need retrieval,
+it needs clustering, and doing it in the database with the search embeddings lets the model reason
+over themes instead of raw posts, so it scales with volume. Pipeline groups, agent judges."

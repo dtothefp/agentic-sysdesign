@@ -54,11 +54,21 @@ from api.models import (
     SearchHit,
     SearchResponse,
     Signal,
+    SignalClustersResponse,
     SignalIn,
     SignalInsertResult,
     Source,
     SourceIn,
 )
+<<<<<<< HEAD:services/api/api/main.py
+=======
+from common.clusters import get_signal_clusters
+from common.db import DATABASE_URL
+from common.rating import resolve_model
+from common.search import embed_query, hybrid_search
+from common.signals import insert_signal
+from worker.tasks import start_run
+>>>>>>> a7460d3 (Module 6: cluster the digest's rated posts into emergent themes):backend/api/main.py
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
 
@@ -511,6 +521,24 @@ def search(
     with pool.connection() as conn:
         hits = hybrid_search(conn, q, query_embedding, limit=limit)
     return SearchResponse(query=q, semantic=query_embedding is not None, hits=[SearchHit(**h) for h in hits])
+
+
+@app.get("/signal-clusters", response_model=SignalClustersResponse, tags=["search"])
+def signal_clusters(
+    days: int = Query(7, ge=1, le=90, description="look-back window"),
+    min_relevance: float = Query(0.5, ge=0.0, le=1.0),
+    max_themes: int = Query(15, ge=1, le=50),
+):
+    """The week's rated posts pre-grouped into emergent themes by embedding similarity, the same
+    result the digest agent's get_signal_clusters MCP tool returns (shared common.clusters, no
+    drift). Themes are computed on demand, not predefined: each call groups this window's rated +
+    embedded posts by cosine proximity, biggest and strongest theme first.
+
+    `clustered` is false when no embeddings back the window (embedded == 0), the inert-until-keyed
+    contract, in which case a caller should fall back to GET /ratings and group the flat list."""
+    # get_signal_clusters opens its own short-lived connection (like get_rated_signals), the
+    # clustering is Python-side and low-frequency, so it doesn't ride the request pool.
+    return SignalClustersResponse(**get_signal_clusters(days=days, min_relevance=min_relevance, max_themes=max_themes))
 
 
 # --- Module 5: agent-written digests ----------------------------------------------
