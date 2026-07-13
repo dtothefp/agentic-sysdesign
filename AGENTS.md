@@ -236,11 +236,12 @@ run (no external keys, no Apify spend), which exercises the Celery chord fan-out
 `curl -X POST localhost:8000/runs -d '{"mode":"demo","limit":5}'`, then watch
 `curl -N localhost:8000/runs/<run_id>/stream`.
 
-Lint with `make lint` (ruff `check`, config in `pyproject.toml`; the formatter is intentionally
-not enforced over the hand-aligned inline comments). Tests are `make test` (pytest under
-`backend/tests/`): unit tests are hermetic, and tests marked `integration` need a live Postgres
-and auto-skip when it's unreachable, so `make test` is green even with no DB up (start Postgres
-first to actually exercise them). "Build" for the backend is `uv sync` plus `make openapi` (spec
+Lint with `make lint` (ruff `check` plus `ruff format --check`, config in `pyproject.toml`);
+`make format` auto-applies the formatter. Tests are `make test` (pytest under `backend/tests/`):
+unit tests are hermetic, and tests marked `integration` need a live Postgres and auto-skip when
+it's unreachable, so `make test` is green even with no DB up (start Postgres first to actually
+exercise them). Lint, format check, and tests all run in CI (`.github/workflows/ci.yml`) on every
+PR and on merge to main, so run `make format` and `make lint` before pushing. "Build" for the backend is `uv sync` plus `make openapi` (spec
 export). The Module 4
 rating layer stays inert unless `RATING_MODEL` and a model are provided; local Ollama is a
 `.devcontainer` sibling that is not installed on the Cloud VM, so demo runs finish with

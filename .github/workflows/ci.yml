@@ -1,0 +1,72 @@
+# One CI gate for the backend: lint, format check, and tests. Runs on every PR and on
+# merges to main. Kept to a single job so "did CI pass" is one green check.
+#
+# A pgvector Postgres service is stood up so the `integration`-marked tests exercise the
+# real app + DB (they auto-skip locally when no DB is reachable). dbmate applies the schema;
+# no seed is needed because the integration tests don't depend on seeded rows.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-format-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: lab
+          POSTGRES_PASSWORD: lab
+          POSTGRES_DB: sysdesign
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lab -d sysdesign"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://lab:lab@localhost:5432/sysdesign
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies (installs Python 3.13 + dev group)
+        run: uv sync
+
+      - name: Lint (ruff check)
+        run: uv run ruff check .
+
+      - name: Format check (ruff format)
+        run: uv run ruff format --check .
+
+      - name: Install dbmate
+        run: |
+          sudo curl -fsSL -o /usr/local/bin/dbmate \
+            https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64
+          sudo chmod +x /usr/local/bin/dbmate
+
+      - name: Apply migrations
+        run: make migrate
+
+      - name: Test (pytest, including DB integration tests)
+        run: uv run pytest

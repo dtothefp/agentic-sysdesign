@@ -1,11 +1,15 @@
 """End-to-end HTTP tests through the real app + Postgres. Auto-skipped when the DB is
 unreachable (see conftest.api_client). Exercises the one write path and the fail-at-the-door
 validation, without needing the Celery worker or Redis."""
-from datetime import UTC, datetime
 
 import pytest
 
 pytestmark = pytest.mark.integration
+
+# A fixed timestamp inside a partition the migrations always create (raw_signals is
+# partitioned by month, 2026 only). Hard-coded rather than datetime.now() so the test is
+# deterministic regardless of the wall clock in CI.
+COVERED_CAPTURED_AT = "2026-07-15T12:00:00+00:00"
 
 
 def test_health(api_client):
@@ -15,10 +19,9 @@ def test_health(api_client):
 
 
 def test_signal_roundtrip_is_idempotent(api_client):
-    captured = datetime.now(UTC).replace(microsecond=0)
     body = {
         "influencer_id": 1,  # seeded influencer
-        "captured_at": captured.isoformat(),
+        "captured_at": COVERED_CAPTURED_AT,
         "payload": {"source": "pytest", "caption": "hello from the test suite"},
     }
     first = api_client.post("/signals", json=body)
