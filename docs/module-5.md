@@ -299,10 +299,13 @@ The names are Console-identifiable on purpose. Triggering `digest-local-m5-mcp-s
 the Console visibly runs one named agent against one named session, no guessing which of
 several look-alikes fired. `agentctl.py` is idempotent: it upserts by name, minting a new
 agent version when config drifts and re-pinning the deployment to it. CI drives the same
-script (`.github/workflows/agent-deploy.yml` plus the setup-ant composite action). The
-preview workflow stands up a per-PR agent on `up` and tears it down on `down`, so preview
-agents are ephemeral. Prod is `push: main`. Locally, `make agent-deploy TIER=local` is the
-hand-crank over the identical code path.
+script (`.github/workflows/agent-deploy.yml` plus the setup-ant composite action). That
+workflow's manual dispatch takes exactly one input, the tier, and infers the rest: `local`
+uses the branch you dispatched from and the tunnel URL and deploys-and-runs, `prod` uses the
+prod domain and deploys without running. Preview isn't a manual option (its per-PR URL isn't
+knowable from the tier); `preview-env.yml` stands up a per-PR agent on `up` and tears it down
+on `down`, so preview agents are ephemeral. Prod also upserts on `push: main`. Locally,
+`make agent-deploy TIER=local` is the hand-crank over the identical code path.
 
 Prod runs manually for now (no `schedule` on the deployment), which is why the digest is
 triggered by hand. A real production system would put `schedule: "0 13 * * *"` on the prod
