@@ -2,15 +2,20 @@
 # standard CI/CD flow: a named agent + named deployment per environment, driven
 # by m5_agents/agentctl.py (a thin `ant` CLI wrapper, see that file).
 #
-#   Manual dispatch  -> deploy any tier against a branch (test a local tunnel or
-#                       a per-PR Railway preview), optionally triggering a run.
+#   Manual dispatch  -> one input, the tier. Everything else is inferred:
+#                       - local: branch = the ref you dispatched from; base URL =
+#                         the cloudflared tunnel; deploys AND runs (you dispatch a
+#                         local deploy to watch the agent hit your laptop).
+#                       - prod:  base URL = sysdesign.thedefrag.ai; deploys only,
+#                         no run (prod is manual; trigger with `make agent-run TIER=prod`).
 #   Merge to main    -> upsert the prod agent + deployment so main always has a
-#                       current prod deployment. It does NOT run: prod is manual
-#                       for now (a real prod system would schedule it, see
-#                       deployment.yaml).
+#                       current prod deployment. Does NOT run (a real prod system
+#                       would schedule it, see deployment.yaml).
 #
-# Preview agents are created/destroyed alongside the Railway preview env in
-# preview-env.yml (that's where the per-PR URL is known), not here.
+# Preview isn't a manual option: its base URL is a per-PR *.up.railway.app that
+# only preview-env.yml knows (it deploys/tears down the preview agent on the
+# `preview` label). agentctl still supports --tier preview; this dropdown just
+# doesn't, because there's nothing to infer it from here.
 #
 # Requires two repo secrets: ANTHROPIC_API_KEY (for `ant`) and SYSDESIGN_API_KEY
 # (injected into the vault credentials). Fork PRs don't receive secrets.
@@ -21,26 +26,10 @@ on:
   workflow_dispatch:
     inputs:
       tier:
-        description: Which environment to deploy
+        description: Which environment to deploy (local uses this branch + the tunnel; prod uses sysdesign.thedefrag.ai)
         type: choice
-        options: [local, preview, prod]
+        options: [local, prod]
         required: true
-      branch:
-        description: Branch name (tier=local)
-        type: string
-        required: false
-      pr:
-        description: PR number (tier=preview)
-        type: string
-        required: false
-      base_url:
-        description: API base URL (tier=preview, the per-PR Railway URL)
-        type: string
-        required: false
-      run:
-        description: Trigger a run immediately after deploy
-        type: boolean
-        default: false
   push:
     branches: [main]
 
@@ -61,28 +50,18 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SYSDESIGN_API_KEY: ${{ secrets.SYSDESIGN_API_KEY }}
-          # Read inputs through the environment (not ${{ }} splicing into the shell)
-          # so branch names with shell metacharacters can't break out of the command.
           TIER: ${{ inputs.tier }}
-          BRANCH_INPUT: ${{ inputs.branch }}
           REF_NAME: ${{ github.ref_name }}
-          PR: ${{ inputs.pr }}
-          BASE_URL: ${{ inputs.base_url }}
-          RUN: ${{ inputs.run }}
           SHA: ${{ github.sha }}
         run: |
-          args=(deploy --tier "$TIER" --sha "$SHA")
-          # tier=local needs a branch. Default to the branch this workflow was
-          # dispatched from, so "pick local, hit Run" works with no extra typing.
+          # Only the tier is passed. agentctl infers the base URL from the tier
+          # (TIER_BASE_URLS) for local and prod; the branch (local only) is the ref
+          # this workflow was dispatched from.
           if [ "$TIER" = "local" ]; then
-            args+=(--branch "${BRANCH_INPUT:-$REF_NAME}")
-          elif [ -n "$BRANCH_INPUT" ]; then
-            args+=(--branch "$BRANCH_INPUT")
+            python m5_agents/agentctl.py deploy --tier local --branch "$REF_NAME" --sha "$SHA" --run
+          else
+            python m5_agents/agentctl.py deploy --tier prod --sha "$SHA"
           fi
-          [ -n "$PR" ] && args+=(--pr "$PR")
-          [ -n "$BASE_URL" ] && args+=(--base-url "$BASE_URL")
-          [ "$RUN" = "true" ] && args+=(--run)
-          python m5_agents/agentctl.py "${args[@]}"
 
       - name: Deploy prod (merge to main)
         if: github.event_name == 'push'
