@@ -61,6 +61,25 @@ custom host fails SAN validation. Both records live in Cloudflare, DNS-only (pro
 so Railway's own Let's Encrypt challenge can reach the origin. Pull the exact token with
 the `verificationDnsHost` / `verificationToken` fields on the custom domain's `status`.
 
+### Gotcha: uvicorn behind Railway's proxy needs `--forwarded-allow-ips='*'`
+
+The api start command in `backend/railway.api.json` carries
+`--proxy-headers --forwarded-allow-ips='*'`. Railway terminates TLS at its edge and forwards
+plain HTTP to the container, so every request arrives with `X-Forwarded-Proto: https` but a
+raw `http` scheme on the socket. Uvicorn only honors that header from IPs listed in
+`--forwarded-allow-ips`, which defaults to `127.0.0.1`. Railway's proxy is not `127.0.0.1`
+from inside the container, so without the flag uvicorn ignores the header and treats requests
+as HTTP. That breaks any generated absolute URL, most visibly the `/mcp` mount: a request to
+`/mcp` (no trailing slash) 307-redirects to `/mcp/` with an `http://` Location, and the
+Managed Agents MCP client blocks the redirect (`server redirected to an insecure (non-HTTPS)
+URL and was blocked`), so the digest agent's MCP tool never initializes and it silently falls
+back to bash curl against the REST API.
+
+This is exactly why the local (cloudflared tunnel) path worked while prod failed: `cloudflared`
+connects to `localhost:8000`, so the socket peer IS `127.0.0.1`, which uvicorn trusts by
+default. Same code, different peer IP, opposite result. `--forwarded-allow-ips='*'` is safe
+here because the container is only reachable through Railway's proxy (no direct ingress).
+
 ## Migrations
 
 The api runs migrations before it takes traffic, via the `preDeployCommand` in
