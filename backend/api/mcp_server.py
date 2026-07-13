@@ -8,19 +8,23 @@ agent dials this server directly through Anthropic's MCP proxy, so nothing has t
 stream waiting to answer.
 
 Co-mounted on the FastAPI app at `/mcp` (see api/main.py), so it shares the app's process,
-its connection target, and its lifespan. That co-mount is deliberate: the tool delegates to
-the same `common.digests.get_rated_signals` the worker's custom tool called, reading whatever
-DATABASE_URL this process was started with. So the environment routing is automatic, the local
-API reads the local (or tunnelled) DB, a preview API reads the preview DB, prod reads prod, with
-zero per-environment MCP config. The schema for the join lives in exactly one place, still
-common/digests.py, so "two things know the schema" never happens.
+its connection target, and its lifespan. Two consequences of the co-mount:
+
+  1. The server queries whatever DATABASE_URL its own process was booted with, so it needs no
+     database configuration of its own per environment. The local API already points at the
+     local (or tunnelled) DB, a preview API at the preview DB, prod at prod, so each tier's
+     /mcp reads that tier's data for free. (The agent still has to be told which tier's /mcp
+     URL to dial, that part isn't free, it's baked into the agent config per environment.)
+  2. The `get_rated_signals` SQL is written once, in common/digests.py, and imported by both
+     this server and the (now retired) worker path, so the query is never duplicated across
+     two definitions that could drift.
 
 Transport is Streamable HTTP (what the Managed Agents MCP proxy speaks). DNS-rebinding
 protection is off because the Host varies across tiers (localhost, the Cloudflare tunnel
 hostname, per-PR *.up.railway.app, the prod domain) and we enforce our own bearer auth on the
 `/mcp` path instead (api/main.py, the same inert-until-keyed SYSDESIGN_API_KEY contract as the
 REST routes). The vault injects that bearer at egress via a static_bearer credential keyed to
-this server's URL (m5_agents/apply.sh); the sandbox never sees the token.
+this server's URL (m5_agents/vault/mcp-bearer.yaml); the sandbox never sees the token.
 """
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings

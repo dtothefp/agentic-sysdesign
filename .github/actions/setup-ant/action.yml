@@ -1,0 +1,26 @@
+# Installs the `ant` CLI (the Claude Platform control-plane CLI) and the pyyaml
+# that m5_agents/agentctl.py needs. Shared by agent-deploy.yml and preview-env.yml.
+#
+# `ant` is distributed as a Homebrew cask (macOS-only), so CI pulls the Linux
+# release tarball directly. Bump `version` here when the local `ant` is upgraded
+# (keep it in step with brew's Caskroom version).
+name: setup-ant
+description: Install the ant CLI and pyyaml for agentctl.
+inputs:
+  version:
+    description: ant CLI version to install
+    default: "1.17.0"
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.13"
+    - shell: bash
+      run: |
+        url="https://github.com/anthropics/anthropic-cli/releases/download/v${{ inputs.version }}/ant_${{ inputs.version }}_linux_amd64.tar.gz"
+        curl -fsSL "$url" -o /tmp/ant.tar.gz
+        tar -xzf /tmp/ant.tar.gz -C /tmp ant
+        sudo install -m 0755 /tmp/ant /usr/local/bin/ant
+        ant --version
+        python -m pip install --quiet pyyaml

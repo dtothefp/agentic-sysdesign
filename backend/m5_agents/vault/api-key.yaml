@@ -1,0 +1,24 @@
+# environment_variable credential for the REST API's X-API-Key header. Unlike
+# the MCP bearer, this one is SHARED across every tier: it's injected as the
+# SYSDESIGN_API_KEY env var the sandbox curls with, and its allowed_hosts list
+# already covers all three tiers' domains, so a single credential authenticates
+# prod, preview, and local API calls. Created once at bootstrap
+# (`agentctl.py bootstrap`); its id lives in resources.json.
+#
+# `injection_location.header` means the value is attached to the outbound
+# request at egress, so the sandbox only ever sees an opaque placeholder in
+# $SYSDESIGN_API_KEY. The secret value is injected from $SYSDESIGN_API_KEY at
+# apply time and never committed.
+display_name: sysdesign API key (X-API-Key)
+auth:
+  type: environment_variable
+  secret_name: SYSDESIGN_API_KEY
+  secret_value: "{{SYSDESIGN_API_KEY}}"
+  networking:
+    type: limited
+    allowed_hosts:
+      - sysdesign.thedefrag.ai
+      - "*.up.railway.app"
+      - sysdesign-local.thedefrag.ai
+  injection_location:
+    header: true

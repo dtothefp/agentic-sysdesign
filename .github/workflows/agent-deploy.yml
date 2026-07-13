@@ -1,0 +1,79 @@
+# Deploy the Module 5 digest agent to the Managed Agents control plane, the
+# standard CI/CD flow: a named agent + named deployment per environment, driven
+# by m5_agents/agentctl.py (a thin `ant` CLI wrapper, see that file).
+#
+#   Manual dispatch  -> deploy any tier against a branch (test a local tunnel or
+#                       a per-PR Railway preview), optionally triggering a run.
+#   Merge to main    -> upsert the prod agent + deployment so main always has a
+#                       current prod deployment. It does NOT run: prod is manual
+#                       for now (a real prod system would schedule it, see
+#                       deployment.yaml).
+#
+# Preview agents are created/destroyed alongside the Railway preview env in
+# preview-env.yml (that's where the per-PR URL is known), not here.
+#
+# Requires two repo secrets: ANTHROPIC_API_KEY (for `ant`) and SYSDESIGN_API_KEY
+# (injected into the vault credentials). Fork PRs don't receive secrets.
+
+name: agent-deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: Which environment to deploy
+        type: choice
+        options: [local, preview, prod]
+        required: true
+      branch:
+        description: Branch name (tier=local)
+        type: string
+        required: false
+      pr:
+        description: PR number (tier=preview)
+        type: string
+        required: false
+      base_url:
+        description: API base URL (tier=preview, the per-PR Railway URL)
+        type: string
+        required: false
+      run:
+        description: Trigger a run immediately after deploy
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+
+concurrency:
+  group: agent-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-ant
+
+      - name: Deploy (manual dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: backend
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SYSDESIGN_API_KEY: ${{ secrets.SYSDESIGN_API_KEY }}
+        run: |
+          python m5_agents/agentctl.py deploy \
+            --tier "${{ inputs.tier }}" \
+            ${{ inputs.branch && format('--branch {0}', inputs.branch) || '' }} \
+            ${{ inputs.pr && format('--pr {0}', inputs.pr) || '' }} \
+            ${{ inputs.base_url && format('--base-url {0}', inputs.base_url) || '' }} \
+            --sha "${{ github.sha }}" \
+            ${{ inputs.run && '--run' || '' }}
+
+      - name: Deploy prod (merge to main)
+        if: github.event_name == 'push'
+        working-directory: backend
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SYSDESIGN_API_KEY: ${{ secrets.SYSDESIGN_API_KEY }}
+        run: python m5_agents/agentctl.py deploy --tier prod --sha "${{ github.sha }}"

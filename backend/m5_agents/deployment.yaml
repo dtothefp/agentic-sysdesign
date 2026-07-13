@@ -1,0 +1,25 @@
+# The deployment: what pins an agent + a kickoff + (optionally) a schedule, and
+# is the thing you trigger in the Console. ECS analogy, the service that runs
+# the task. `agentctl.py` reads this file and calls `ant beta:deployments
+# create/update`, keyed by NAME, so one named deployment maps to one named agent
+# per tier and you can see in the Console exactly which agent a run came from.
+#
+# There is no schedule here on purpose. Every tier's deployment is MANUAL for
+# now: you trigger a run from the Console or with `agentctl run`. A real
+# production system would make the prod deployment autonomous by adding a cron,
+# e.g. a daily 13:00-UTC sweep:
+#   schedule: "0 13 * * *"   # <-- intentionally omitted; prod runs are manual for now
+# (Only prod would ever get one; preview/local are always hand-triggered.)
+#
+# `agentctl.py` renders the pieces below per environment:
+#   - name              suffixed with the tier: digest-prod / digest-preview-pr<N> / digest-local-<branch>
+#   - kickoff {{BASE_URL}} replaced with the tier's API base URL, sent as the session's initial_event
+#   - memory            mounted read_write for PROD ONLY, so preview/local runs never
+#                       pollute prod's week-over-week digest memory (agentctl omits the
+#                       resource for non-prod; the system prompt already handles empty memory)
+name: digest
+kickoff: |
+  Write this week's digest. API base URL: {{BASE_URL}}
+memory_instructions: |
+  Previous weekly digests, one dated file per week. Read the most recent one
+  before writing this week's, then save a dated copy of the new digest here.

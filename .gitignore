@@ -5,4 +5,3 @@ __pycache__/
 .DS_Store
 uv.lock.bak
 backend/m5_agents/output/
-backend/m5_agents/deployments.json  # per-machine {tier: depl_id}; local/preview point at dev URLs

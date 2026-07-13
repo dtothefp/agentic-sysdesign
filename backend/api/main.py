@@ -145,7 +145,7 @@ app = FastAPI(
 # get_rated_signals directly, retiring the worker-held custom tool. App-level dependencies
 # (require_api_key) don't run on a mounted sub-app, so the /mcp path gets its own bearer check,
 # same inert-until-keyed SYSDESIGN_API_KEY contract as the REST routes. The vault's static_bearer
-# credential injects that token at egress (m5_agents/apply.sh); the sandbox never sees it.
+# credential injects that token at egress (m5_agents/vault/mcp-bearer.yaml); the sandbox never sees it.
 
 @app.middleware("http")
 async def _mcp_bearer_auth(request: Request, call_next):
@@ -488,7 +488,7 @@ def _read_digest(digest_id: int) -> dict | None:
 
 
 # Module 5: POST /digests no longer TRIGGERS a session. A digest run is started by triggering a
-# Managed Agents *deployment* (m5_agents/deploy.py); the API is out of that loop, and so is the
+# Managed Agents *deployment* (m5_agents/deployment.yaml); the API is out of that loop, and so is the
 # Celery worker that used to babysit the session. What POST keeps is one narrow job: mint a
 # pending row and hand back its id. That matters because a manual deployment run replays fixed
 # initial_events (no per-run arguments), so nothing outside the agent can inject a fresh digest
@@ -499,7 +499,7 @@ def _read_digest(digest_id: int) -> dict | None:
 @app.post("/digests", response_model=Digest, tags=["digests"])
 def create_digest() -> dict:
     """Mint a queued digest row and return it. Not a trigger, a row factory: the digest agent
-    (started by a deployment, m5_agents/deploy.py) calls this as its first step to get an id,
+    (started by a deployment, m5_agents/deployment.yaml) calls this as its first step to get an id,
     writes the digest, then completes the row via PUT /digests/{id}/content."""
     with pool.connection() as conn:
         row = (

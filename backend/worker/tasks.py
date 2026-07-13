@@ -327,7 +327,7 @@ def sweep_unrated(self, batch: int = 50) -> str:
 # Managed Agent session, held its event stream, and answered the get_rated_signals custom tool
 # host-side. That custom tool was the fragile piece, bound to whatever process held the stream,
 # so it couldn't survive an unattended run. Module 5's migration moved the trigger to a Managed
-# Agents *deployment* (m5_agents/deploy.py) and the tool to a remote MCP server (api/mcp_server.py)
+# Agents *deployment* (m5_agents/deployment.yaml) and the tool to a remote MCP server (api/mcp_server.py)
 # the agent dials directly. So the whole babysitter, and its host-side custom-tool listener, is
 # gone. Nothing here enqueues digest work anymore; the deployment does, server-side.
 #
