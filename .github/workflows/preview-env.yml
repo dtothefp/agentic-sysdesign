@@ -57,6 +57,22 @@ jobs:
           } > comment.md
           gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file comment.md
 
+      # The Module 5 digest agent's preview lives and dies with this Railway env:
+      # deploy a named agent + deployment pointed at the preview /mcp URL now, and
+      # the `down` job archives it. This is the one place the per-PR URL is known.
+      - uses: ./.github/actions/setup-ant
+      - name: Deploy the preview digest agent
+        working-directory: backend
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SYSDESIGN_API_KEY: ${{ secrets.SYSDESIGN_API_KEY }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PREVIEW_URL: ${{ steps.up.outputs.PREVIEW_URL }}
+          GIT_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python m5_agents/agentctl.py deploy --tier preview \
+            --pr "$PR_NUMBER" --base-url "$PREVIEW_URL" --sha "$GIT_SHA"
+
   down:
     if: >-
       (github.event.action == 'unlabeled' && github.event.label.name == 'preview') ||
@@ -70,3 +86,11 @@ jobs:
           RAILWAY_WORKSPACE_TOKEN: ${{ secrets.RAILWAY_WORKSPACE_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: python3 infra/railway-preview.py down "$PR_NUMBER"
+
+      - uses: ./.github/actions/setup-ant
+      - name: Tear down the preview digest agent
+        working-directory: backend
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: python m5_agents/agentctl.py teardown --tier preview --pr "$PR_NUMBER"

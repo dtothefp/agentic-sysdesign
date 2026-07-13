@@ -3,7 +3,8 @@
 This is the join GET /ratings deliberately doesn't offer: ratings attached back to
 their source posts (handle, URL, caption). It lives in common/ because two callers
 share it, the Celery worker answering the agent's custom tool call (worker/tasks.py)
-and the laptop demo runner (m5_agents/run_digest.py). When Module 5 graduates the
+and the MCP server that fronts the same query for the deployed agent
+(api/mcp_server.py). When Module 5 graduates the
 custom tool to a plain GET /rated-signals endpoint, the API becomes the third caller
 and the custom-tool plumbing goes away; this function outlives all of those doorways.
 

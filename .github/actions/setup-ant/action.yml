@@ -1,0 +1,30 @@
+# Installs the `ant` CLI (the Claude Platform control-plane CLI) plus the pyyaml
+# that m5_agents/agentctl.py needs. Shared by agent-deploy.yml and preview-env.yml.
+#
+# There is no dedicated marketplace action for `ant`, so this composes two maintained
+# ones (actions/setup-go, actions/setup-python) with Anthropic's own documented install
+# command (`go install .../cmd/ant@<version>`). That keeps us off a hand-built per-arch
+# tarball URL: setup-go provides the toolchain, and Go's module proxy resolves the pinned
+# version. Bump `version` when the local `ant` is upgraded (keep it in step with brew's
+# Caskroom version). Install docs: https://platform.claude.com/docs/en/api/sdks/cli
+name: setup-ant
+description: Install the ant CLI and pyyaml for agentctl.
+inputs:
+  version:
+    description: ant CLI version to install (a git tag on anthropics/anthropic-cli, e.g. v1.17.0)
+    default: "v1.17.0"
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v5
+      with:
+        go-version: "1.22"
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.13"
+    - shell: bash
+      run: |
+        go install "github.com/anthropics/anthropic-cli/cmd/ant@${{ inputs.version }}"
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+        "$(go env GOPATH)/bin/ant" --version
+        python -m pip install --quiet pyyaml

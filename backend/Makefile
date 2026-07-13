@@ -6,7 +6,7 @@ export DATABASE_URL
 # truth, so there's no generated schema file to keep in sync.
 DBMATE = dbmate --no-dump-schema --migrations-dir db/migrations --url "$(DATABASE_URL)?sslmode=disable"
 
-.PHONY: up migrate rollback status new seed seed-influencers db-init db-fresh db-empty drills setup down reset api openapi worker worker-beat ollama-pull
+.PHONY: up migrate rollback status new seed seed-influencers db-init db-fresh db-empty drills setup down reset api openapi worker worker-beat ollama-pull agent-deploy agent-run agent-list
 
 up:
 	docker compose up -d db
@@ -107,3 +107,26 @@ down:
 	docker compose down -v
 
 reset: down setup
+
+# Module 5: deploy/run the digest agent via m5_agents/agentctl.py (a thin `ant`
+# CLI wrapper). Needs ANTHROPIC_API_KEY (for `ant`) and SYSDESIGN_API_KEY (for
+# the vault credentials) in the environment; agentctl reads shared resource ids
+# from m5_agents/resources.json. CI drives the same script (see the app repo's
+# .github/workflows/agent-deploy.yml); these targets are the local hand-crank.
+#
+#   make agent-deploy TIER=local BRANCH=$(git branch --show-current) RUN=1
+#   make agent-run    TIER=local BRANCH=$(git branch --show-current)
+#   make agent-list
+TIER ?= local
+BRANCH ?= $(shell git branch --show-current)
+agent-deploy:
+	uv run python m5_agents/agentctl.py deploy --tier $(TIER) \
+	  $(if $(BRANCH),--branch $(BRANCH),) $(if $(PR),--pr $(PR),) \
+	  $(if $(BASE_URL),--base-url $(BASE_URL),) $(if $(RUN),--run,)
+
+agent-run:
+	uv run python m5_agents/agentctl.py run --tier $(TIER) \
+	  $(if $(BRANCH),--branch $(BRANCH),) $(if $(PR),--pr $(PR),)
+
+agent-list:
+	uv run python m5_agents/agentctl.py list

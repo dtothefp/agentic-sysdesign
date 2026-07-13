@@ -15,6 +15,7 @@ dependencies = [
   # Module 4: LangSmith tracing for the rating model call (standalone @traceable, no LangChain).
   "langsmith>=0.10.2",
   "anthropic>=0.116.0",
+  "mcp>=1.13",
 ]
 
 [tool.uv]

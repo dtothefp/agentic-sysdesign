@@ -1,0 +1,19 @@
+# static_bearer credential for the MCP server. One credential per /mcp URL:
+# static_bearer is keyed to an exact `mcp_server_url` and cannot wildcard, so
+# every tier whose agent dials a distinct /mcp needs its own bearer credential
+# in the vault. `agentctl.py deploy` ensures one exists for the tier's URL
+# before creating the agent (create-if-missing, keyed by URL), calling
+# `ant beta:vaults:credentials create --vault-id <id> --auth ...`.
+#
+# The token is a SECRET and is never committed. agentctl injects the real value
+# from $SYSDESIGN_API_KEY (a repo/CI secret) at apply time; the {{...}} markers
+# below are the only substitutions it makes into this template.
+#
+# This is how the agent authenticates to its own MCP server: agent.yaml declares
+# the server with NO auth, and the vault attaches this bearer at egress, so the
+# token never enters the sandbox.
+display_name: sysdesign MCP bearer ({{BASE_URL}}/mcp)
+auth:
+  type: static_bearer
+  mcp_server_url: "{{BASE_URL}}/mcp"
+  token: "{{SYSDESIGN_API_KEY}}"

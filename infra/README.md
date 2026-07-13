@@ -177,8 +177,8 @@ local API at a stable hostname the vault credential already allows.
   `sysdesign-local`, id `dd6113aa-...`, config in `~/.cloudflared/config.yml` on David's
   machine, created 2026-07-11 via `cloudflared tunnel login` + `create` + `route dns`).
 - The vault credential's `allowed_hosts` includes this hostname, so the agent's
-  `X-API-Key` is substituted toward it exactly like prod. Keep `m5_agents/apply.sh` and
-  the live credential in sync when hosts change.
+  `X-API-Key` is substituted toward it exactly like prod. Keep `m5_agents/vault/api-key.yaml`
+  and the live credential in sync when hosts change.
 - Run it with `cloudflared tunnel run sysdesign-local`. Nothing listens until the local
   API is up; the tunnel itself only ever holds an OUTBOUND connection to Cloudflare's
   edge, which is why it works behind NAT with no router config.
