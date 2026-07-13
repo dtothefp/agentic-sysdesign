@@ -17,7 +17,7 @@ survive a page refresh.
 """
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import psycopg
 import redis
@@ -225,7 +225,7 @@ def rate_signal(
             # no double count) once a model is healthy.
             _announce_rating(run_id, handle, content_hash)
             return f"gave-up: {type(exc).__name__}"
-        raise self.retry(exc=exc, countdown=min(2 ** self.request.retries, 300))
+        raise self.retry(exc=exc, countdown=min(2 ** self.request.retries, 300)) from exc
 
     with psycopg.connect(DATABASE_URL) as conn:
         did = insert_rating(conn, content_hash, model, rating)
@@ -343,7 +343,7 @@ def start_run(mode: str = "live", limit: int = 5, model: str | None = None) -> d
     signals rides the request and is stored on the row (so two runs can rate with two models
     and be diffed). None falls back to the worker's RATING_MODEL default; if that's unset
     too, the run scrapes without rating."""
-    run_ts = datetime.now(timezone.utc).isoformat()
+    run_ts = datetime.now(UTC).isoformat()
     with psycopg.connect(DATABASE_URL) as conn:
         influencers = conn.cursor(row_factory=dict_row).execute(
             "SELECT id, instagram_handle, last_scraped_at FROM influencers ORDER BY id"

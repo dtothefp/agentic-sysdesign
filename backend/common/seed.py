@@ -23,7 +23,7 @@ Run:  uv run python -m common.seed                    # influencers + 4000 synth
 import argparse
 import json
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import psycopg
@@ -76,7 +76,7 @@ def main() -> None:
             print(f"influencers: {len(ids)} (no signals seeded)")
             return
 
-        start = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        start = datetime(2026, 5, 1, tzinfo=UTC)
         inserted = 0
         for i in range(4000):
             influencer_id = random.choice(ids)

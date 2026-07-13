@@ -20,7 +20,7 @@ import os
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import psycopg
@@ -79,7 +79,7 @@ def scrape_influencer_live(
         # Apify validates this field against a regex that only accepts ISO timestamps
         # ending in Z, not +00:00, which is what Python's isoformat() emits for UTC.
         wm = watermark if isinstance(watermark, datetime) else datetime.fromisoformat(str(watermark))
-        actor_input["onlyPostsNewerThan"] = wm.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        actor_input["onlyPostsNewerThan"] = wm.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     posts = _apify_run(load_apify_key(), actor_input)
 
@@ -123,7 +123,7 @@ def scrape_influencer_demo(
     stream visibly ticks. No Apify call. Each payload is distinct (carries an index) so the
     content_hash differs and the ON CONFLICT upsert actually inserts rather than deduping."""
     handle = inf["instagram_handle"]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     inserted = 0
     new_items: list[dict] = []
     for i in range(limit):

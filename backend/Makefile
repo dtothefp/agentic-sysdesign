@@ -6,7 +6,7 @@ export DATABASE_URL
 # truth, so there's no generated schema file to keep in sync.
 DBMATE = dbmate --no-dump-schema --migrations-dir db/migrations --url "$(DATABASE_URL)?sslmode=disable"
 
-.PHONY: up migrate rollback status new seed seed-influencers db-init db-fresh db-empty drills setup down reset api openapi worker worker-beat ollama-pull agent-deploy agent-run agent-list
+.PHONY: up migrate rollback status new seed seed-influencers db-init db-fresh db-empty drills setup down reset api openapi worker worker-beat ollama-pull lint test agent-deploy agent-run agent-list
 
 up:
 	docker compose up -d db
@@ -98,6 +98,18 @@ ollama-pull:
 openapi:
 	uv run python -c "import json; from api.main import app; print(json.dumps(app.openapi(), indent=2))" > openapi.json
 	@echo "wrote backend/openapi.json"
+
+# lint the backend with ruff (pyflakes + pycodestyle + import sort + pyupgrade + bugbear).
+# check-only: the formatter (ruff format) is available but deliberately not enforced over the
+# hand-aligned inline comments the codebase leans on.
+lint:
+	uv run ruff check .
+
+# run the test suite (pytest). Unit tests are hermetic; the tests marked `integration` need a
+# live Postgres (make setup / db-init) and auto-skip when it's unreachable, so this is safe to
+# run anywhere. Pass EXTRA=-k... or EXTRA='-m "not integration"' to filter.
+test:
+	uv run pytest $(EXTRA)
 
 # host one-shot: bring the db up (publishes 5432) then migrate + seed.
 setup: up db-init

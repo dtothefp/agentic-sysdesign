@@ -33,6 +33,7 @@ from psycopg_pool import ConnectionPool
 from redis import asyncio as aioredis
 from sse_starlette.sse import EventSourceResponse
 
+from api.mcp_server import mcp as mcp_server
 from api.models import (
     DailyRollup,
     Digest,
@@ -50,7 +51,6 @@ from api.models import (
     Source,
     SourceIn,
 )
-from api.mcp_server import mcp as mcp_server
 from common.db import DATABASE_URL
 from common.rating import resolve_model
 from common.signals import insert_signal
@@ -265,7 +265,7 @@ def create_source(s: SourceIn):
                 .fetchone()
             )
         except psycopg.errors.ForeignKeyViolation:
-            raise HTTPException(400, f"influencer_id {s.influencer_id} does not exist")
+            raise HTTPException(400, f"influencer_id {s.influencer_id} does not exist") from None
 
 
 # --- signals -------------------------------------------------------------------
@@ -282,11 +282,11 @@ def create_signal(sig: SignalIn):
                 conn, sig.influencer_id, sig.captured_at, sig.payload, sig.source_id
             )
         except psycopg.errors.ForeignKeyViolation:
-            raise HTTPException(400, f"influencer_id {sig.influencer_id} does not exist")
+            raise HTTPException(400, f"influencer_id {sig.influencer_id} does not exist") from None
         except psycopg.errors.CheckViolation as e:
             # no partition covers captured_at. Provision the month (create_month_partition)
             # or pick a captured_at inside an existing partition.
-            raise HTTPException(400, f"no partition for captured_at {sig.captured_at}: {e}")
+            raise HTTPException(400, f"no partition for captured_at {sig.captured_at}: {e}") from e
     return SignalInsertResult(inserted=inserted, content_hash=h)
 
 
@@ -363,7 +363,7 @@ def create_run(trigger: RunTrigger):
         try:
             resolve_model(trigger.model)
         except ValueError as e:
-            raise HTTPException(400, str(e))
+            raise HTTPException(400, str(e)) from e
     return RunCreated(**start_run(mode=trigger.mode, limit=trigger.limit, model=trigger.model))
 
 

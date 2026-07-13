@@ -45,7 +45,7 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
@@ -174,7 +174,7 @@ def build_metadata(tier: str, base_url: str, branch, pr, sha) -> dict:
     meta = {
         "tier": tier,
         "base_url": base_url,
-        "deployed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "deployed_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     if branch:
         meta["branch"] = branch
