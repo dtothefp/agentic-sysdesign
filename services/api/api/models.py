@@ -133,6 +133,36 @@ class DigestContent(BaseModel):
     content_md: str
 
 
+# --- Module 6: hybrid search ------------------------------------------------------
+
+
+class SearchHit(BaseModel):
+    content_hash: str
+    handle: str | None
+    url: str | None
+    caption: str | None  # excerpt (first 200 chars)
+    captured_at: datetime
+    # RRF fused score; higher is better. Not comparable to a ts_rank or a cosine distance, it's
+    # a sum of 1/(k+rank) contributions, so it's only meaningful RELATIVE to the other hits.
+    score: float
+    # which retrieval halves surfaced this hit: ["lexical"], ["semantic"], or both. Both means
+    # the two methods agreed, the strongest signal RRF can produce.
+    sources: list[str]
+    # the Module 4 rating, when this content has been rated (LEFT JOIN, so null until then).
+    relevance: float | None = None
+    summary: str | None = None
+    topics: list[str] | None = None
+
+
+class SearchResponse(BaseModel):
+    query: str
+    # False when EMBEDDING_MODEL is unset or embedding the query failed: results are lexical-only.
+    # Surfaced so a caller knows the semantic half didn't run rather than silently getting half a
+    # search. This is the inert-until-keyed contract made visible in the response.
+    semantic: bool
+    hits: list[SearchHit]
+
+
 class Digest(BaseModel):
     id: int
     # queued -> running -> completed | failed. `completed` is flipped by the AGENT's

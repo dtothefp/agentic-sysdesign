@@ -28,6 +28,7 @@ this server's URL (packages/agents/vault/mcp-bearer.yaml); the sandbox never see
 """
 
 from common.digests import get_rated_signals as _query
+from common.search import search_signals as _search
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -57,3 +58,26 @@ def get_rated_signals(days: int = 7, min_relevance: float = 0.5) -> list[dict]:
     """
     # No dsn override: reads this process's DATABASE_URL, so the tier's own database is queried.
     return _query(days=days, min_relevance=min_relevance)
+
+
+@mcp.tool()
+def search_signals(query: str, limit: int = 20) -> dict:
+    """Hybrid search over all tracked signal captions (not just rated ones): Postgres full-text
+    (lexical) fused with pgvector semantic similarity via Reciprocal Rank Fusion. Use this to find
+    posts about a TOPIC or CONCEPT ("autonomous agents", "RAG pipelines", a product name) rather
+    than to list recently-rated posts (that's get_rated_signals). Complements get_rated_signals:
+    search finds candidates by content, get_rated_signals reads the AI relevance layer.
+
+    Returns {"query", "semantic", "hits"}. Each hit has content_hash, handle, url, caption excerpt,
+    captured_at, a fused `score` (higher = better, only comparable within this result set), and
+    `sources` naming which halves found it (["lexical","semantic"] means both agreed, the strongest
+    signal). When it has been rated, the hit also carries relevance/summary/topics. `semantic` is
+    false when no embedding model is configured, in which case results are lexical-only.
+
+    query: free text; supports quoted "exact phrases", OR, and -negation (websearch syntax).
+    limit: max hits to return (default 20).
+    """
+    # No dsn override: reads this process's DATABASE_URL, so the tier's own database is queried,
+    # exactly like get_rated_signals. Shares common.search.search_signals with GET /search so the
+    # tool and the REST endpoint can't drift.
+    return _search(query=query, limit=limit)

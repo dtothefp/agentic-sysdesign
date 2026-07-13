@@ -46,4 +46,11 @@ celery_app.conf.beat_schedule = {
         "task": "worker.tasks.sweep_unrated",
         "schedule": crontab(minute="*/10"),
     },
+    # Module 6 backstop: sweep signals that never got a search embedding (same slip-through paths
+    # as ratings, plus the first-time backfill when EMBEDDING_MODEL is set on a populated DB).
+    # No-ops instantly when EMBEDDING_MODEL is unset, so it's safe to schedule always.
+    "sweep-unembedded-backstop": {
+        "task": "worker.tasks.sweep_unembedded",
+        "schedule": crontab(minute="*/10"),
+    },
 }
