@@ -38,7 +38,7 @@ in one repo that accumulates. Each finished module gets a git tag (`module-1`,
   the function lives in (see `packages/package-supabase/`). The lesson stands either way,
   long unreliable work stays on the queue-backed worker, short scheduled work goes
   serverless.
-- **Module 4, AI rating layer (BUILT, semantic cache pending).** An LLM lands in the write
+- **Module 4, AI rating layer (BUILT, semantic cache BUILT in Module 6).** An LLM lands in the write
   path as a new pipeline stage, not a longer task. Each scrape task already knows which
   signals it newly inserted (`insert_signal` returns `inserted`), so it enqueues one
   `rate_signal` Celery job per new row and finishes; ratings drain through the same worker
@@ -61,9 +61,13 @@ in one repo that accumulates. Each finished module gets a git tag (`module-1`,
   default and the credentials, secrets never ride in request bodies. With neither set the
   whole layer is inert, which is prod's state until a provider key lands in
   `infra/railway-env.py`. Ratings read back over `GET /ratings` (newest first, optional
-  `min_relevance`), which is the surface the Module 5 digest agent will consume. Still to
-  come from the original sketch, the pgvector semantic cache (serve a prior rating when
-  caption embeddings are near-identical, skipping the model). The design rule, **own the
+  `min_relevance`), which is the surface the Module 5 digest agent will consume. The
+  pgvector semantic cache from the original sketch is now built (in Module 6, since it reuses
+  that module's embedding pipeline), before paying for a rating call `rate_signal` embeds the
+  caption and copies the nearest already-rated neighbor's rating when it's within
+  `RATING_CACHE_MAX_DISTANCE` (0.05 cosine, near-duplicate content), tagging the copy
+  `cache:<model>`; the layer degrades to a normal model call when no embedding provider is
+  configured or the lookup misses. The design rule, **own the
   interface, rent the model**. Self-host where compute is free (your laptop), rent where
   compute is metered (the cloud), and make the code indifferent to which one it's talking
   to. The AWS rebuild that once held this module number was cut to a read-only talk track
@@ -82,9 +86,24 @@ in one repo that accumulates. Each finished module gets a git tag (`module-1`,
   worker-side custom tool vs the MCP+deployment target, and the Messages-API-to-Managed-
   Agents layer cake, with ASCII diagrams of both the current and target flows) in
   [docs/module-5.md](docs/module-5.md).
-- **Module 6, hybrid search (stretch).** pgvector HNSW + Postgres full-text + Reciprocal
-  Rank Fusion over signal content. Upgrades the API's search and becomes a retrieval tool
-  the digest agent can call.
+- **Module 6, hybrid search (BUILT).** pgvector HNSW + Postgres full-text + Reciprocal Rank
+  Fusion over signal content. Two retrieval halves run in parallel, a lexical half (a
+  generated `caption_tsv` column with a GIN inverted index, `websearch_to_tsquery` +
+  `ts_rank_cd` cover-density ranking) and a semantic half (a `signal_embeddings` table,
+  `vector(1536)` behind an HNSW index, cosine `<=>` KNN). RRF fuses the two ranked lists by
+  ordinal rank alone (`sum 1/(k+rank)`, k=60), so no score normalization is needed across the
+  incomparable `ts_rank` and cosine scales, and a doc both halves surface outranks one either
+  found alone. Surfaces as `GET /search?q=` and the `search_signals` MCP tool the digest agent
+  can call, both sharing `common/search.py` so they can't drift. The whole semantic half is
+  inert until keyed, with `EMBEDDING_MODEL` unset, search degrades to lexical-only and says so
+  (`"semantic": false`), so it works offline with no provider. The embedding pipeline is its
+  own decoupled Celery stage (`embed_signal` + a `sweep_unembedded` beat backstop) mirroring
+  Module 4's rating stage, and its embeddings double as the Module 4 semantic-cache key, one
+  `signal_embeddings` table, two features. The provider adapter (`common/embedding.py`) is the
+  same **own the interface, rent the model** urllib shim as the rating adapter, speaking the
+  OpenAI-compatible `/v1/embeddings` shape. Full first-principles walkthrough (tsvector/GIN,
+  the generated-column immutability trap, HNSW approximate-vs-exact, why RRF fuses by rank, the
+  shared-table cache, EXPLAIN drills, interview soundbites) in [docs/module-6.md](docs/module-6.md).
 
 ## Appendix modules
 
