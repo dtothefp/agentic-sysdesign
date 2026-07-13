@@ -151,6 +151,8 @@ make worker      # DEV CONTAINER: Celery worker for Module 2 fan-out jobs (needs
 make worker-beat # DEV CONTAINER: Celery beat, periodic backstops (rollup refresh + unrated sweep)
 make ollama-pull # DEV CONTAINER: one-time pull of the Module 4 local rating model (llama3.2:1b)
 make openapi     # export the OpenAPI spec to backend/openapi.json (no db/server needed)
+make lint        # ruff check over the backend (config in pyproject.toml)
+make test        # pytest (backend/tests); integration tests auto-skip when Postgres is down
 make down        # drop the volume
 make reset       # down then setup
 uv run python -m common.seed   # re-seed (idempotent, inserts nothing the second time)
@@ -234,8 +236,12 @@ run (no external keys, no Apify spend), which exercises the Celery chord fan-out
 `curl -X POST localhost:8000/runs -d '{"mode":"demo","limit":5}'`, then watch
 `curl -N localhost:8000/runs/<run_id>/stream`.
 
-There are no automated tests and no lint/format tooling configured in this repo (no pytest, ruff,
-mypy, etc.). "Build" for the backend is `uv sync` plus `make openapi` (spec export). The Module 4
+Lint with `make lint` (ruff `check`, config in `pyproject.toml`; the formatter is intentionally
+not enforced over the hand-aligned inline comments). Tests are `make test` (pytest under
+`backend/tests/`): unit tests are hermetic, and tests marked `integration` need a live Postgres
+and auto-skip when it's unreachable, so `make test` is green even with no DB up (start Postgres
+first to actually exercise them). "Build" for the backend is `uv sync` plus `make openapi` (spec
+export). The Module 4
 rating layer stays inert unless `RATING_MODEL` and a model are provided; local Ollama is a
 `.devcontainer` sibling that is not installed on the Cloud VM, so demo runs finish with
 `rated_count = 0`, which is expected. The empty `frontend/` has no UI to run yet.
