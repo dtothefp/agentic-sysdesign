@@ -163,6 +163,44 @@ class SearchResponse(BaseModel):
     hits: list[SearchHit]
 
 
+class ClusterMember(BaseModel):
+    # one post inside a theme; enough to drill in (fetch the full row) without a second call.
+    handle: str | None
+    url: str | None
+    content_hash: str
+    relevance: float
+
+
+class ClusterRepresentative(ClusterMember):
+    # the theme's strongest post (highest relevance), carries a caption excerpt so the agent can
+    # name the theme without pulling every member.
+    caption: str | None = None
+
+
+class SignalTheme(BaseModel):
+    # an emergent theme: a group of the week's rated posts that sit close in embedding space.
+    # theme_size (member count) is the momentum signal the agent judges on.
+    theme_size: int
+    avg_relevance: float
+    topics: list[str]
+    representative: ClusterRepresentative
+    members: list[ClusterMember]
+
+
+class SignalClustersResponse(BaseModel):
+    days: int
+    min_relevance: float
+    # how many rated posts matched the window; `embedded` is how many of those had an embedding to
+    # cluster on. A big gap means EMBEDDING_MODEL is off or backfill is incomplete.
+    rated_in_window: int
+    embedded: int
+    # False when embedded == 0 (no embeddings back the window): the caller falls back to the flat
+    # get_rated_signals list. Same inert-until-keyed contract as search's `semantic` flag.
+    clustered: bool
+    theme_count: int
+    themes: list[SignalTheme]
+
+
 class Digest(BaseModel):
     id: int
     # queued -> running -> completed | failed. `completed` is flipped by the AGENT's

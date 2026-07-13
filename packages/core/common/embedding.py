@@ -107,6 +107,18 @@ def to_vector_literal(vector: list[float]) -> str:
     return "[" + ",".join(repr(float(x)) for x in vector) + "]"
 
 
+def from_vector_literal(literal: str) -> list[float]:
+    """The inverse of to_vector_literal. pgvector's text output '[0.1,0.2,...]' -> a float list.
+
+    Postgres returns a `vector` column cast to text (or read without the pgvector adapter) in this
+    bracketed shape. We parse it by hand rather than register the adapter, the same raw-over-library
+    choice as to_vector_literal, so the clustering layer can pull embeddings back into Python."""
+    inner = literal.strip().strip("[]")
+    if not inner:
+        return []
+    return [float(x) for x in inner.split(",")]
+
+
 @traceable(run_type="embedding", name="embed_text")
 def _embeddings_call(text: str, model: str, timeout: int = 60) -> list[float]:
     """The one embeddings call, isolated so LangSmith renders it as a proper embedding run.

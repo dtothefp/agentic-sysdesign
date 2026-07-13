@@ -104,6 +104,14 @@ in one repo that accumulates. Each finished module gets a git tag (`module-1`,
   OpenAI-compatible `/v1/embeddings` shape. Full first-principles walkthrough (tsvector/GIN,
   the generated-column immutability trap, HNSW approximate-vs-exact, why RRF fuses by rank, the
   shared-table cache, EXPLAIN drills, interview soundbites) in [docs/module-6.md](docs/module-6.md).
+  The same embeddings also power a discovery-side reuse (`common/clusters.py`), `get_signal_clusters`
+  groups the week's rated posts into emergent themes by cosine proximity (greedy threshold, exact
+  distances, a pure testable core like RRF) so the Module 5 digest agent reasons over ~15 themes
+  instead of hundreds of raw posts. It's a second MCP tool plus `GET /signal-clusters`, with
+  `get_rated_signals` kept as the flat drill-down; embeddings do two jobs, retrieval for search and
+  clustering for the digest (pipeline groups, agent judges). Inert-until-keyed holds, `clustered:
+  false` when no embeddings back the window and the agent falls back to the flat list. The
+  clustering appendix is in [docs/module-6.md](docs/module-6.md).
 
 ## Appendix modules
 
