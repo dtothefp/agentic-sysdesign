@@ -1,0 +1,10 @@
+{
+  // Points the Python extension at the container's uv-workspace venv so interpreter selection,
+  // test discovery, and the debug configs all agree. This repo is developed INSIDE the dev
+  // container, where uv's venv lives at /home/vscode/.venv (UV_PROJECT_ENVIRONMENT in
+  // .devcontainer/compose.yml) rather than /workspace/.venv, because the bind-mounted
+  // /workspace/.venv is the host's macOS venv and its binaries can't run on Linux.
+  "python.defaultInterpreterPath": "/home/vscode/.venv/bin/python",
+  "python.testing.pytestEnabled": true,
+  "python.testing.pytestArgs": ["."]
+}
