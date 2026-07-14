@@ -94,17 +94,17 @@ in one repo that accumulates. Each finished module gets a git tag (`module-1`,
   ordinal rank alone (`sum 1/(k+rank)`, k=60), so no score normalization is needed across the
   incomparable `ts_rank` and cosine scales, and a doc both halves surface outranks one either
   found alone. Surfaces as `GET /search?q=` and the `search_signals` MCP tool the digest agent
-  can call, both sharing `common/search.py` so they can't drift. The whole semantic half is
+  can call, both sharing `packages/core/common/search.py` so they can't drift. The whole semantic half is
   inert until keyed, with `EMBEDDING_MODEL` unset, search degrades to lexical-only and says so
   (`"semantic": false`), so it works offline with no provider. The embedding pipeline is its
   own decoupled Celery stage (`embed_signal` + a `sweep_unembedded` beat backstop) mirroring
   Module 4's rating stage, and its embeddings double as the Module 4 semantic-cache key, one
-  `signal_embeddings` table, two features. The provider adapter (`common/embedding.py`) is the
+  `signal_embeddings` table, two features. The provider adapter (`packages/core/common/embedding.py`) is the
   same **own the interface, rent the model** urllib shim as the rating adapter, speaking the
   OpenAI-compatible `/v1/embeddings` shape. Full first-principles walkthrough (tsvector/GIN,
   the generated-column immutability trap, HNSW approximate-vs-exact, why RRF fuses by rank, the
   shared-table cache, EXPLAIN drills, interview soundbites) in [docs/module-6.md](docs/module-6.md).
-  The same embeddings also power a discovery-side reuse (`common/clusters.py`), `get_signal_clusters`
+  The same embeddings also power a discovery-side reuse (`packages/core/common/clusters.py`), `get_signal_clusters`
   groups the week's rated posts into emergent themes by cosine proximity (greedy threshold, exact
   distances, a pure testable core like RRF) so the Module 5 digest agent reasons over ~15 themes
   instead of hundreds of raw posts. It's a second MCP tool plus `GET /signal-clusters`, with
