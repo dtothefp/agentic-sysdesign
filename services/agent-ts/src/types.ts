@@ -36,6 +36,12 @@ export interface ToolSchema {
   input_schema: Record<string, unknown>;
 }
 
+// The tool-dispatch seam. Same role as the Complete seam: runAgent calls it to execute one tool by
+// name. The real one (tools.ts runTool) hits the REST API; tests inject a fake that records calls
+// and never touches the network. Python's tests monkeypatch loop.run_tool for the same reason; ESM
+// imports can't be monkeypatched cleanly, so we thread it through as an option instead.
+export type RunTool = (name: string, input: Record<string, unknown>) => Promise<unknown>;
+
 // The flat event stream runAgent yields, one per loop event. Same wire shape as the Python agent
 // (loop.py) so a single chat-web UI can read either backend over the same SSE contract.
 export type AgentEvent =
