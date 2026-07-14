@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 import psycopg
 import redis
 from common.db import DATABASE_URL
+from common.embedding import EmbeddingError, default_embedding_model, embed_text, insert_embedding
 from common.rating import RatingError, default_model, insert_rating, rate_caption
 from common.signals import refresh_rollup
 from psycopg.rows import dict_row
@@ -32,6 +33,13 @@ from worker.celery_app import celery_app
 from worker.scrape import scrape_influencer_demo, scrape_influencer_live
 
 _redis = redis.Redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379"))
+
+# Module 4 semantic cache: max cosine DISTANCE at which a prior rating is copied instead of
+# calling the model. 0.05 distance == 0.95 cosine similarity, i.e. near-identical captions
+# (a reposted quote, a creator's boilerplate CTA). Conservative on purpose: a loose threshold
+# would copy a rating across posts that merely share a topic, which is wrong, the cache is for
+# DUPLICATE-ish content, not similar content. Tunable via env without a code change.
+_CACHE_MAX_DISTANCE = float(os.environ.get("RATING_CACHE_MAX_DISTANCE", "0.05"))
 
 
 def _channel(run_id: int) -> str:
@@ -89,6 +97,14 @@ def scrape_influencer(self, run_id: int, inf: dict, run_ts: str, mode: str, limi
             # run_id rides along so the rating task can bump this run's rated_count and publish
             # a `rating` delta, making the (decoupled) rating phase visible on the SSE stream.
             rate_signal.delay(item["content_hash"], inf["instagram_handle"], item["caption"], rating_model, run_id)
+
+    # Module 6: the embedding stage is its OWN pipeline, decoupled from rating exactly as rating
+    # is decoupled from scraping. Both write signal_embeddings idempotently, so it doesn't matter
+    # which fires first, whoever gets there stores the vector and the other's embed call fast-skips
+    # on "already-embedded". Inert when EMBEDDING_MODEL is unset (search stays lexical-only).
+    if default_embedding_model():
+        for item in new_items:
+            embed_signal.delay(item["content_hash"], item["caption"])
 
     done, total, run_inserted = row
     _publish(
@@ -223,6 +239,21 @@ def rate_signal(self, content_hash: str, handle: str, caption: str | None, model
             _announce_rating(run_id, handle, content_hash)
             return "already-rated"
 
+    # Module 4 semantic cache. If a near-identical caption was already rated, copy that rating and
+    # skip the model call entirely. The embedding needed to find the neighbor is ~100x cheaper than
+    # a chat completion and doubles as the search vector, so this is a strict win when it hits and
+    # a cheap miss when it doesn't. Inert (returns None immediately) when EMBEDDING_MODEL is unset,
+    # so the rating layer behaves exactly as before whenever the semantic layer is off.
+    cached = _semantic_cache_lookup(content_hash, caption)
+    if cached is not None:
+        with psycopg.connect(DATABASE_URL) as conn:
+            # Tag the model as cache:<model> so a hit is visible in signal_ratings (query
+            # WHERE model LIKE 'cache:%' for the hit rate). The rating VALUES are the neighbor's.
+            insert_rating(conn, content_hash, f"cache:{model}", cached)
+            conn.commit()
+        _announce_rating(run_id, handle, content_hash)
+        return "cached"
+
     try:
         rating = rate_caption(handle, caption or "", model)
     except RatingError as exc:
@@ -239,6 +270,55 @@ def rate_signal(self, content_hash: str, handle: str, caption: str | None, model
         conn.commit()
     _announce_rating(run_id, handle, content_hash)
     return "rated" if did else "lost-race"
+
+
+def _semantic_cache_lookup(content_hash: str, caption: str | None) -> dict | None:
+    """Module 4 semantic cache probe. Returns a rating to COPY (from the nearest already-rated
+    neighbor) when one is within _CACHE_MAX_DISTANCE, else None (rate normally).
+
+    When EMBEDDING_MODEL is set, this first ensures the signal has an embedding: it reuses a
+    stored one if present (the search pipeline may have embedded it already), otherwise computes
+    and stores it. That stored vector is then the probe for a nearest-neighbor lookup against
+    every OTHER signal that already has a rating. The embedding is stored on a miss too, so the
+    signal is immediately searchable and can serve as a future cache donor. One embedding, two
+    features (search + cache), which is the whole reason both live in signal_embeddings.
+
+    Returns None (rate normally) whenever embeddings are off or the embed call fails, so a flaky
+    embedding provider degrades to the plain model path instead of blocking ratings."""
+    model = default_embedding_model()
+    if not model:
+        return None
+    with psycopg.connect(DATABASE_URL) as conn:
+        stored = conn.execute("SELECT 1 FROM signal_embeddings WHERE content_hash = %s", (content_hash,)).fetchone()
+        if not stored:
+            try:
+                vector = embed_text(caption or "", model)
+            except EmbeddingError:
+                return None  # provider hiccup: fall back to a normal model call, no cache
+            insert_embedding(conn, content_hash, model, vector)
+            conn.commit()
+        # Nearest already-rated neighbor, probed by THIS signal's stored embedding. The CROSS JOIN
+        # pulls the probe vector once; the <=> ORDER BY ... LIMIT 1 is the HNSW-accelerated KNN.
+        # Excluding content_hash itself matters only after the insert above (it now has a row).
+        row = conn.execute(
+            """
+            SELECT r.relevance, r.confidence, r.topics, r.summary,
+                   e.embedding <=> me.embedding AS dist
+            FROM signal_embeddings e
+            JOIN signal_ratings r ON r.content_hash = e.content_hash
+            CROSS JOIN (SELECT embedding FROM signal_embeddings WHERE content_hash = %s) me
+            WHERE e.content_hash <> %s
+            ORDER BY e.embedding <=> me.embedding
+            LIMIT 1
+            """,
+            (content_hash, content_hash),
+        ).fetchone()
+    if row is None:
+        return None  # no other rated signal to copy from yet
+    relevance, confidence, topics, summary, dist = row
+    if dist is None or dist > _CACHE_MAX_DISTANCE:
+        return None  # nothing near enough; a rating for merely-similar content would be wrong
+    return {"relevance": relevance, "confidence": confidence, "topics": topics, "summary": summary}
 
 
 def _announce_rating(run_id: int | None, handle: str, content_hash: str) -> None:
@@ -329,6 +409,64 @@ def sweep_unrated(self, batch: int = 50) -> str:
         ).fetchall()
     for content_hash, handle, caption in rows:
         rate_signal.delay(content_hash, handle, caption, model)
+    return f"enqueued {len(rows)}"
+
+
+# --- Module 6: the embedding stage (search + the rating cache share this table) ---
+
+
+@celery_app.task(name="worker.tasks.embed_signal", bind=True, max_retries=3)
+def embed_signal(self, content_hash: str, caption: str | None) -> str:
+    """Embed one signal's caption into signal_embeddings for hybrid search. Same idempotency and
+    retry shape as rate_signal: skip if already embedded (dedup on the input hash), insert is
+    ON CONFLICT DO NOTHING for the sweep/scrape race, retry on EmbeddingError with backoff, then
+    give up (the sweep re-embeds later once the provider is healthy).
+
+    The embed call happens with NO db connection open, same reason as the model call, it's a
+    network round-trip and a held connection would be a pool slot doing nothing. Inert when
+    EMBEDDING_MODEL is unset."""
+    model = default_embedding_model()
+    if not model:
+        return "disabled (EMBEDDING_MODEL not set)"
+    with psycopg.connect(DATABASE_URL) as conn:
+        if conn.execute("SELECT 1 FROM signal_embeddings WHERE content_hash = %s", (content_hash,)).fetchone():
+            return "already-embedded"
+    try:
+        vector = embed_text(caption or "", model)
+    except EmbeddingError as exc:
+        if self.request.retries >= self.max_retries:
+            return f"gave-up: {type(exc).__name__}"
+        raise self.retry(exc=exc, countdown=min(2**self.request.retries, 300)) from exc
+    with psycopg.connect(DATABASE_URL) as conn:
+        did = insert_embedding(conn, content_hash, model, vector)
+        conn.commit()
+    return "embedded" if did else "lost-race"
+
+
+@celery_app.task(name="worker.tasks.sweep_unembedded", bind=True)
+def sweep_unembedded(self, batch: int = 50) -> str:
+    """Beat backstop for embeddings, the exact mirror of sweep_unrated. The scrape path already
+    enqueues an embed_signal per new row; this catches whatever slipped through (embeds that
+    exhausted their retries, signals inserted via the API, or the whole backlog the first time
+    EMBEDDING_MODEL gets set on an already-populated database). Bounded batch per tick so a
+    backlog drains gradually instead of flooding the queue.
+
+    Only real content (source = 'instagram') is embedded, same bill-not-a-safety-net reasoning as
+    sweep_unrated: silently embedding thousands of seeded drill signals is a cost, not a backstop."""
+    model = default_embedding_model()
+    if not model:
+        return "disabled (EMBEDDING_MODEL not set)"
+    with psycopg.connect(DATABASE_URL) as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT ON (r.content_hash) r.content_hash, r.payload->>'caption' AS caption "
+            "FROM raw_signals r "
+            "WHERE r.payload->>'source' = 'instagram' "
+            "  AND NOT EXISTS (SELECT 1 FROM signal_embeddings se WHERE se.content_hash = r.content_hash) "
+            "ORDER BY r.content_hash, r.captured_at DESC LIMIT %s",
+            (batch,),
+        ).fetchall()
+    for content_hash, caption in rows:
+        embed_signal.delay(content_hash, caption)
     return f"enqueued {len(rows)}"
 
 

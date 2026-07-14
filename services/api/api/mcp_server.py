@@ -27,7 +27,9 @@ REST routes). The vault injects that bearer at egress via a static_bearer creden
 this server's URL (packages/agents/vault/mcp-bearer.yaml); the sandbox never sees the token.
 """
 
+from common.clusters import get_signal_clusters as _clusters
 from common.digests import get_rated_signals as _query
+from common.search import search_signals as _search
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -57,3 +59,52 @@ def get_rated_signals(days: int = 7, min_relevance: float = 0.5) -> list[dict]:
     """
     # No dsn override: reads this process's DATABASE_URL, so the tier's own database is queried.
     return _query(days=days, min_relevance=min_relevance)
+
+
+@mcp.tool()
+def search_signals(query: str, limit: int = 20) -> dict:
+    """Hybrid search over all tracked signal captions (not just rated ones): Postgres full-text
+    (lexical) fused with pgvector semantic similarity via Reciprocal Rank Fusion. Use this to find
+    posts about a TOPIC or CONCEPT ("autonomous agents", "RAG pipelines", a product name) rather
+    than to list recently-rated posts (that's get_rated_signals). Complements get_rated_signals:
+    search finds candidates by content, get_rated_signals reads the AI relevance layer.
+
+    Returns {"query", "semantic", "hits"}. Each hit has content_hash, handle, url, caption excerpt,
+    captured_at, a fused `score` (higher = better, only comparable within this result set), and
+    `sources` naming which halves found it (["lexical","semantic"] means both agreed, the strongest
+    signal). When it has been rated, the hit also carries relevance/summary/topics. `semantic` is
+    false when no embedding model is configured, in which case results are lexical-only.
+
+    query: free text; supports quoted "exact phrases", OR, and -negation (websearch syntax).
+    limit: max hits to return (default 20).
+    """
+    # No dsn override: reads this process's DATABASE_URL, so the tier's own database is queried,
+    # exactly like get_rated_signals. Shares common.search.search_signals with GET /search so the
+    # tool and the REST endpoint can't drift.
+    return _search(query=query, limit=limit)
+
+
+@mcp.tool()
+def get_signal_clusters(days: int = 7, min_relevance: float = 0.5, max_themes: int = 15) -> dict:
+    """The week's rated posts pre-grouped into emergent themes by embedding similarity. Call this
+    FIRST when writing the digest: it does the mechanical grouping for you, so you reason over
+    ~15 themes instead of hundreds of raw posts. Themes are not predefined, they emerge from this
+    week's data (a week full of voice-agent posts yields a big voice-agents theme on its own),
+    ordered biggest and strongest first.
+
+    Returns {"clustered", "rated_in_window", "embedded", "theme_count", "themes"}. Each theme has
+    theme_size (member count, the momentum signal), avg_relevance, topics (union across members),
+    a representative post (handle, url, caption, the strongest member), and members (handle, url,
+    content_hash for every post in the theme, so you can drill in without another call). Name each
+    theme and judge its momentum from theme_size + avg_relevance + last week's memory; for the 2-3
+    posts to highlight, use a theme's representative or its members.
+
+    When "clustered" is false (no embeddings back the window, embedded == 0), fall back to
+    get_rated_signals and group the flat list yourself as before.
+
+    days: look-back window (default 7). min_relevance: floor 0-1 (default 0.5). max_themes: cap on
+    themes returned (default 15).
+    """
+    # No dsn override: reads this process's DATABASE_URL, the tier's own database, like the other
+    # tools. Shares common.clusters.get_signal_clusters with GET /signal-clusters, no drift.
+    return _clusters(days=days, min_relevance=min_relevance, max_themes=max_themes)

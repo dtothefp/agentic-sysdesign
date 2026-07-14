@@ -25,8 +25,10 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 import psycopg
+from common.clusters import get_signal_clusters
 from common.db import DATABASE_URL
 from common.rating import resolve_model
+from common.search import embed_query, hybrid_search
 from common.signals import insert_signal
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Security
 from fastapi.responses import JSONResponse
@@ -50,7 +52,10 @@ from api.models import (
     Run,
     RunCreated,
     RunTrigger,
+    SearchHit,
+    SearchResponse,
     Signal,
+    SignalClustersResponse,
     SignalIn,
     SignalInsertResult,
     Source,
@@ -122,6 +127,7 @@ TAGS = [
     {"name": "rollup", "description": "Precomputed daily counts (materialized view)."},
     {"name": "runs", "description": "Background fan-out scrape jobs + live SSE progress."},
     {"name": "ratings", "description": "Per-signal AI ratings, keyed on content_hash."},
+    {"name": "search", "description": "Module 6: hybrid lexical + semantic search over signal content, fused with RRF."},
     {"name": "digests", "description": "Weekly agent-written digests (Module 5). The agent delivers its own result via PUT."},
 ]
 
@@ -481,6 +487,50 @@ def list_ratings(limit: int = Query(50, le=200), min_relevance: float | None = Q
     params.append(limit)
     with pool.connection() as conn:
         return conn.cursor(row_factory=dict_row).execute(sql, params).fetchall()
+
+
+# --- search (Module 6: hybrid lexical + semantic retrieval) ----------------------
+
+
+@app.get("/search", response_model=SearchResponse, tags=["search"])
+def search(
+    q: str = Query(..., min_length=1, description="free-text query (words, quoted phrases, -negation)"),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Hybrid search over signal captions: Postgres full-text (lexical) + pgvector (semantic),
+    fused with Reciprocal Rank Fusion. Each hit reports its fused `score` and which halves found
+    it (`sources`).
+
+    The semantic half runs only when EMBEDDING_MODEL is set: the query is embedded with the same
+    model the documents were, then matched by cosine distance. With no model, or if embedding the
+    query fails, `semantic` is false and results are lexical-only (still useful, exact matches
+    rank fine). This is the same inert-until-keyed contract the rating layer uses, made visible
+    in the response instead of hidden."""
+    # embed_query returns None when EMBEDDING_MODEL is unset OR the embed call failed, so the
+    # endpoint degrades to lexical-only in both cases rather than 500-ing on a provider hiccup.
+    # Shared with the MCP tool (common.search) so both make the identical fallback decision.
+    query_embedding = embed_query(q)
+    with pool.connection() as conn:
+        hits = hybrid_search(conn, q, query_embedding, limit=limit)
+    return SearchResponse(query=q, semantic=query_embedding is not None, hits=[SearchHit(**h) for h in hits])
+
+
+@app.get("/signal-clusters", response_model=SignalClustersResponse, tags=["search"])
+def signal_clusters(
+    days: int = Query(7, ge=1, le=90, description="look-back window"),
+    min_relevance: float = Query(0.5, ge=0.0, le=1.0),
+    max_themes: int = Query(15, ge=1, le=50),
+):
+    """The week's rated posts pre-grouped into emergent themes by embedding similarity, the same
+    result the digest agent's get_signal_clusters MCP tool returns (shared common.clusters, no
+    drift). Themes are computed on demand, not predefined: each call groups this window's rated +
+    embedded posts by cosine proximity, biggest and strongest theme first.
+
+    `clustered` is false when no embeddings back the window (embedded == 0), the inert-until-keyed
+    contract, in which case a caller should fall back to GET /ratings and group the flat list."""
+    # get_signal_clusters opens its own short-lived connection (like get_rated_signals), the
+    # clustering is Python-side and low-frequency, so it doesn't ride the request pool.
+    return SignalClustersResponse(**get_signal_clusters(days=days, min_relevance=min_relevance, max_themes=max_themes))
 
 
 # --- Module 5: agent-written digests ----------------------------------------------
