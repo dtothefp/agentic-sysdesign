@@ -4,7 +4,11 @@ Because data analysis should spark joy! This document covers the entertaining ad
 
 ## 🎉 What's New
 
-### 1. `/vibes` API Endpoint
+### 1. 🥚 Hidden Easter Egg
+
+Try `curl http://localhost:8000/teapot` for a surprise! This implements the famous HTTP 418 "I'm a teapot" status code from RFC 2324. It's hidden from the OpenAPI docs for the joy of discovery.
+
+### 2. `/vibes` API Endpoint
 
 A creative, Spotify-Wrapped-style endpoint that gives you entertaining insights about your influencer data.
 
@@ -40,7 +44,7 @@ curl http://localhost:8000/vibes
 }
 ```
 
-### 2. Vibes CLI Tool
+### 3. Vibes CLI Tool
 
 A colorful command-line tool that fetches and displays your vibes in style.
 
@@ -80,7 +84,7 @@ uv run python -m common.vibes_cli --api-url http://localhost:8000
 ============================================================
 ```
 
-### 3. Fun Statistics SQL Drills
+### 4. Fun Statistics SQL Drills
 
 A comprehensive SQL script that generates entertaining visualizations and insights directly in your terminal.
 
