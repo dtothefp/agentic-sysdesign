@@ -26,6 +26,14 @@ tasks:
       cache: false
       persistent: true
 
+  # one-shot, source-agnostic embedding backfill for after you set EMBEDDING_MODEL on an
+  # already-populated database. Synchronous (no worker/redis needed). See worker/backfill.py.
+  embed-backfill:
+    command: 'uv run --package sysdesign-worker python -m worker.backfill'
+    toolchain: 'system'
+    options:
+      cache: false
+
   lint:
     script: 'uv run ruff check . && uv run ruff format --check .'
     toolchain: 'system'
