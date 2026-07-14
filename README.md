@@ -23,29 +23,47 @@ milestone is one `git checkout` away.
 
 ## Layout
 
+A moon + uv-workspace monorepo. One `uv.lock` at the root covers every member, and moon is
+the ONE task runner (no Makefile). Tasks live in the project that owns them: the db
+lifecycle in `packages/core` (it owns the migrations), agent hand-cranks in
+`packages/agents`, dev servers in `services/*`, and workspace-level lifecycle (compose
+up/down, setup, format) in a root-level moon project (`moon.yml` at the repo root).
+
 ```
-backend/    all Python + database: common/, db/migrations/, drills/, api/, Makefile, pyproject.toml
-frontend/   Next.js UI (empty until Module 2)
+moon.yml          root moon project: workspace lifecycle tasks (root:up, root:setup, ...)
+.moon/            moon workspace config (also the .env loader's repo-root marker)
+apps/chat-web/    React chat agent UI (scaffold, Module 7)
+services/api/     FastAPI surface (sysdesign-api) + its railway.json + tests
+services/worker/  Celery worker + beat (sysdesign-worker) + its railway.json
+packages/core/    shared common/ + db/ migrations + drills + tests (sysdesign-core)
+packages/task-contract/  task names + send-only Celery client (decouples api from worker)
+packages/agents/  Module 5 Managed Agents YAML + agentctl.py
+infra/            Railway env-var sync + preview-env scripts
 .claude/skills/   in-repo skills (e.g. scrape-signals)
 .devcontainer/    reproducible container with its own sibling Postgres
 ```
 
-Run all backend commands from `backend/`.
+Run everything from the repo root. moon is a standalone Rust binary (`brew install moon`),
+and `uv sync --all-packages` installs the whole Python workspace. No node or pnpm anywhere.
+The moon version is pinned in `.moon/workspace.yml`, and the containers fetch a matching
+release binary directly.
 
 ## Quick start (local)
 
-Needs Docker, `uv`, `psql`, and `dbmate` on the host (`brew install dbmate`). The dev
-container has all four preinstalled, so in Cursor you skip straight to `make db-init`.
+Needs Docker, `uv`, `psql`, `dbmate` (`brew install dbmate`), and `moon` (`brew install moon`)
+on the host. The dev container has all five preinstalled, so in Cursor you skip straight to
+`moon run core:db-init`.
 
 ```bash
-cd backend
-make setup     # up + migrate + seed, one shot
-make drills    # run the six EXPLAIN drills (whole file, smoke test)
+uv sync --all-packages
+moon run root:setup    # db up + migrate + seed, one shot
+moon run core:drills   # run the six EXPLAIN drills (whole file, smoke test)
 # or open an interactive shell to study one plan at a time:
 psql "postgresql://lab:lab@localhost:5432/sysdesign"
 ```
 
-`make down` drops the volume for a clean slate. `make reset` is down then setup.
+`moon run root:down` drops the volume for a clean slate. `moon run root:reset` is down
+then setup. `moon run :lint` and `moon run :test` sweep every project's lint/test.
 
 ## Migrations (dbmate)
 
@@ -54,14 +72,13 @@ A migration is just an ordered SQL file with a `migrate:up` block (apply) and a
 table, so it never runs one twice. No ORM, no codegen.
 
 ```bash
-cd backend
-make migrate    # apply every pending migration in order
-make status     # show which have run, which are pending
-make rollback   # undo the most recent migration (its migrate:down)
-make new name=add_events_index   # scaffold the next timestamped migration
+moon run core:migrate    # apply every pending migration in order
+moon run core:status     # show which have run, which are pending
+moon run core:rollback   # undo the most recent migration (its migrate:down)
+NAME=add_events_index moon run core:new   # scaffold the next timestamped migration
 ```
 
-`backend/db/migrations/20260708000001_initial_schema.sql` creates the tables (`raw_signals`
+`packages/core/db/migrations/20260708000001_initial_schema.sql` creates the tables (`raw_signals`
 RANGE partitioned by `captured_at`, the partition key inside every unique constraint, and a
 durable `runs` job-of-record table that Module 2 writes to on state transitions while
 pushing high-frequency progress to a Redis cache). `20260708000002_monthly_partitions.sql`
@@ -82,10 +99,10 @@ covering the migrations, the API, the scrape skill, and the EXPLAIN drills) live
 
 ## API
 
-A thin FastAPI surface over the schema lives in `backend/api/`. Run it from `backend/`:
+A thin FastAPI surface over the schema lives in `services/api/`. Run it from the repo root:
 
 ```bash
-make api    # uvicorn at http://localhost:8000, interactive docs at /docs
+moon run api:dev    # uvicorn at http://localhost:8000, interactive docs at /docs
 ```
 
 Endpoints: `/influencers` (`POST` a single creator or `POST /influencers/bulk` for the whole
@@ -101,28 +118,28 @@ To fill the database with real (not synthetic) data, use the in-repo `scrape-sig
 entirely over the API: `POST /influencers/bulk` to seed the watchlist, `GET /influencers` to
 read them back, scrape each one's recent Instagram posts (Apify REST, all in parallel,
 incremental off each watermark), then `POST /signals` for each post. Every write takes the same
-idempotent path the app uses. Needs `APIFY_API_KEY` in `backend/.env` (gitignored). There's no
-`make scrape`; the scrape is a skill Claude Code runs, not a build target.
+idempotent path the app uses. Needs `APIFY_API_KEY` in the repo-root `.env` (gitignored). There's no
+scrape task; the scrape is a skill Claude Code runs, not a build target.
 
 ### OpenAPI
 
 FastAPI generates the OpenAPI spec automatically from the Pydantic models and route
-signatures. No extra library. While `make api` is running, the spec is machine-readable at
+signatures. No extra library. While `moon run api:dev` is running, the spec is machine-readable at
 `/openapi.json`, with Swagger UI at `/docs` and ReDoc at `/redoc`. `operationId`s are the
 handler names (`list_signals`, `create_signal`) so a generated client reads cleanly.
 
-`make openapi` writes the spec to `backend/openapi.json` without a running db or server (it
+`moon run api:openapi` writes the spec to `services/api/openapi.json` without a running db or server (it
 only introspects the routes). That file is the codegen input for the Module 2 Next.js
 frontend, which points a typed-client generator (openapi-typescript / orval) at it to get a
 fully typed API client. Regenerate it whenever the API surface changes.
 
 ## Drills
 
-`backend/drills/explain-drills.sql` has six `EXPLAIN (ANALYZE, BUFFERS)` drills covering
+`packages/core/drills/explain-drills.sql` has six `EXPLAIN (ANALYZE, BUFFERS)` drills covering
 pruning, index vs seq scan, the no-partition-key anti-pattern, covering index-only scans,
 the matview read/write split, and concurrent refresh. Run them one block at a time in an
-interactive `psql` session to read each plan on its own; `make drills` fires all six at
-once and is only useful as a smoke test.
+interactive `psql` session to read each plan on its own; `moon run core:drills` fires all
+six at once and is only useful as a smoke test.
 
 ## Dev environments
 
@@ -130,36 +147,37 @@ once and is only useful as a smoke test.
   Self-contained: a Python workspace plus its own Postgres, defined in
   `.devcontainer/compose.yml`. The workspace reaches the db over the internal network at
   `db:5432`, so the container's Postgres does NOT publish a host port. That's deliberate. It
-  means the dev container never collides with a host-run `make up` on 5432, and you can run
-  both at once. The tradeoff is the container's db is a separate volume, so it starts empty.
-  Seed it once from a container terminal:
+  means the dev container never collides with a host-run `moon run root:up` on 5432, and you
+  can run both at once. The tradeoff is the container's db is a separate volume, so it starts
+  empty. Seed it once from a container terminal:
 
   ```bash
-  cd backend
-  make db-init   # schema + partitions + full seed, no `docker compose up` (db is a sibling here)
-  make drills
+  moon run core:db-init   # schema + partitions + full seed, no `docker compose up` (db is a sibling here)
+  moon run core:drills
   ```
 
-  Use `db-init` inside the container, not `make setup`. `setup` tries to `docker compose up`
-  a db, which is the host workflow; inside the container the db is already running.
+  Use `core:db-init` inside the container, not `root:setup`. `setup` tries to
+  `docker compose up` a db, which is the host workflow; inside the container the db is
+  already running.
 
   `db-init` runs the *full* seed (the watchlist plus 4000 synthetic signals, so the drills have
   volume). If you just want a clean database with only the influencers and none of the synthetic
-  rows, run `make db-fresh` instead: it drops the db, re-applies every migration from empty, and
-  seeds only the watchlist. Stop `make api` first, since an open connection blocks the drop.
-  `make seed-influencers` seeds just the watchlist without touching the schema.
+  rows, run `moon run core:db-fresh` instead: it drops the db, re-applies every migration from
+  empty, and seeds only the watchlist. Stop `moon run api:dev` first, since an open connection
+  blocks the drop. `moon run core:seed-influencers` seeds just the watchlist without touching
+  the schema.
 - `.cursor/environment.json`. The config Cursor Cloud Agents read to boot their own
-  environment. Installs `uv` and the Postgres client, syncs deps in `backend/`, and brings
+  environment. Installs `uv` and the Postgres client, syncs the workspace (`uv sync --all-packages`), and brings
   up the db. Cloud agents run in a Docker container on a VM. If docker-in-docker is not
   available in the agent environment, swap the `start` step for a Dockerfile-provisioned
   Postgres or an external database URL passed as a scoped secret.
 
 ### If the dev container fails with "port is already allocated"
 
-Something on the host already holds `5432` (usually a `make setup` / `make up` you ran
-earlier). The current dev container no longer publishes 5432, so a fresh "Rebuild
+Something on the host already holds `5432` (usually a `moon run root:setup` / `root:up` you
+ran earlier). The current dev container no longer publishes 5432, so a fresh "Rebuild
 Container" resolves it. If you're on an older checkout that still published the port, either
-stop the host stack first (`make down`) or pull this fix.
+stop the host stack first (`moon run root:down`) or pull this fix.
 
 ## Git workflow
 

@@ -1,0 +1,27 @@
+[project]
+name = "sysdesign-api"
+version = "0.1.0"
+description = "The FastAPI surface: signals read/write, runs trigger + SSE progress stream, and the co-mounted MCP server the digest agent dials. Talks to the worker only through sysdesign-task-contract (task names over the broker), never by importing worker code."
+requires-python = ">=3.13"
+dependencies = [
+  "sysdesign-core",
+  "sysdesign-task-contract",
+  "psycopg[binary]>=3.2",
+  "psycopg-pool>=3.2",
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "redis>=5.0",         # the async pub/sub subscriber behind the SSE progress stream
+  "sse-starlette>=2.1", # EventSourceResponse: FastAPI-native SSE (disconnect + keep-alive)
+  "mcp>=1.13",          # the remote MCP server co-mounted at /mcp (api/mcp_server.py)
+]
+
+[tool.uv.sources]
+sysdesign-core = { workspace = true }
+sysdesign-task-contract = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["api"]

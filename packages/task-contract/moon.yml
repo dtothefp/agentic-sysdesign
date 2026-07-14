@@ -1,0 +1,15 @@
+# moon project: the API<->worker task contract (names + send-only client). Tiny on
+# purpose; if this project grows, the two services are coupling again.
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+stack: 'backend'
+layer: 'library'
+language: 'python'
+
+tasks:
+  lint:
+    script: 'uv run ruff check . && uv run ruff format --check .'
+    toolchain: 'system'
+    inputs:
+      - 'task_contract/**/*.py'
+      - '/pyproject.toml'

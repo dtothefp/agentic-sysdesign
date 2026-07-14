@@ -10,16 +10,16 @@ practice: no partition, no insert.
 Secondary example only. The primary scraper is scrape_ig.py (the Defrag watchlist). This one
 stays as a template for any source that exposes clean JSON, mapped onto the same /signals path.
 
-Usage (from the repo root, with the API running via `cd backend && make api`):
-  uv run --project backend python .claude/skills/scrape-signals/scrape_hn.py \
+Usage (from the repo root, with the API running via `moon run api:dev`):
+  uv run python .claude/skills/scrape-signals/scrape_hn.py \
       --influencer-id 1 --query "Postgres" --limit 20
 """
+
 import argparse
 import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
 
 
 def fetch_hn(query: str, limit: int) -> list[dict]:
@@ -31,9 +31,7 @@ def fetch_hn(query: str, limit: int) -> list[dict]:
 
 
 def post_signal(api: str, influencer_id: int, captured_at: str, payload: dict) -> dict:
-    body = json.dumps(
-        {"influencer_id": influencer_id, "captured_at": captured_at, "payload": payload}
-    ).encode()
+    body = json.dumps({"influencer_id": influencer_id, "captured_at": captured_at, "payload": payload}).encode()
     req = urllib.request.Request(
         api + "/signals",
         data=body,
@@ -82,9 +80,7 @@ def main() -> None:
             if e.code != 400:
                 print(f"  ! {e.code} on {payload['hn_object_id']}: {e.read().decode()[:200]}")
 
-    print(
-        f"hn hits: {len(hits)}  inserted: {inserted}  already-had: {duped}  skipped: {skipped}"
-    )
+    print(f"hn hits: {len(hits)}  inserted: {inserted}  already-had: {duped}  skipped: {skipped}")
 
 
 if __name__ == "__main__":

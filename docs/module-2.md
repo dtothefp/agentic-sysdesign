@@ -15,7 +15,7 @@ then keep it open next to the code.
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
 │   BROWSER   │     │  API        │     │   REDIS     │     │  POSTGRES   │
 │  (or curl)  │     │  (FastAPI)  │     │             │     │             │
-│             │     │  make api   │     │ the queue + │     │ the durable │
+│             │     │  api:dev    │     │ the queue + │     │ the durable │
 │ asks for    │     │             │     │ the megaphone│    │ truth       │
 │ things,     │     │ front door: │     │             │     │             │
 │ watches the │     │ fast answers│     │ nothing that│     │ runs,       │
@@ -25,7 +25,7 @@ then keep it open next to the code.
                     └─────────────┘     ┌─────────────┐
                                         │ CELERY      │
                                         │ WORKER      │
-                                        │ make worker │
+                                        │ worker:dev  │
                                         │             │
                                         │ the muscle: │
                                         │ pulls jobs, │
@@ -117,7 +117,7 @@ Nothing has scraped. The HTTP request is already over. The work is sitting in a 
 
 ### Step 2: the fan-out (worker process)
 
-The worker (`make worker`) is subscribed to the broker and pulls tasks, up to 4 at once
+The worker (`moon run worker:dev`) is subscribed to the broker and pulls tasks, up to 4 at once
 (`--concurrency 4`). Each `scrape_influencer(run_id, inf, ...)` does the same dance:
 
 ```
@@ -163,7 +163,7 @@ times) or on every dashboard read (which would defeat the point of a matview).
 ## How the worker gets the message (there is no trigger)
 
 The API never starts, calls, or reaches into the worker. Both processes were started
-independently (`make api`, `make worker`) and both import the entire codebase. A file
+independently (`moon run api:dev`, `moon run worker:dev`) and both import the entire codebase. A file
 doesn't belong to a process; what determines where a function executes is who CALLS it,
 and it runs in the caller's process. `start_run` lives in `worker/tasks.py` for
 organization, but it's a plain `def` (no `@celery_app.task` on it), so when `create_run`
@@ -200,7 +200,7 @@ WORKER: ...gets its answer, runs the task, loops back to BRPOP
 You've seen this pattern in JS as long-polling, or as `const msg = await queue.get()`, a
 promise that stays pending until someone pushes. The worker was already leaning in with
 its hand out, so delivery feels instant even though nobody triggered anything. And if no
-worker is running, messages just pile up in the list. Try it once: stop `make worker`,
+worker is running, messages just pile up in the list. Try it once: stop `moon run worker:dev`,
 POST a run, watch it sit queued forever, then start the worker and watch it drain the
 backlog. That's the decoupling made visible.
 
@@ -590,7 +590,7 @@ with a database connection open, so queueing a task from inside a task just to r
 statement would be a pointless round trip through Redis. The TASK wrapper exists solely so
 celery-beat, which can only speak "enqueue a task by name on a schedule", has something to
 schedule (`beat_schedule` in `worker/celery_app.py`). Beat is a separate little process
-(`make worker-beat`), cron for Celery. If you set a breakpoint in `refresh_rollup_task`
+(`moon run worker:beat`), cron for Celery. If you set a breakpoint in `refresh_rollup_task`
 and never hit it, that's why. Nobody enqueues it unless beat is running. The backstop
 exists because runs aren't the only door into `raw_signals` (the scrape-signals skill
 POSTs to `/signals` directly, and those inserts never pass through `finalize_run`), so
@@ -610,12 +610,12 @@ run inside a transaction block, which is why `finalize_run` opens its connection
 
 ## Running it
 
-Three dev-container terminals, all from `backend/`:
+Three dev-container terminals, all from the repo root:
 
 ```bash
-make api       # terminal A: the front door, :8000
-make worker    # terminal B: the muscle
-make worker-beat   # terminal C, optional: the 5-minute refresh backstop
+moon run api:dev       # terminal A: the front door, :8000
+moon run worker:dev    # terminal B: the muscle
+moon run worker:beat   # terminal C, optional: the 5-minute refresh backstop
 ```
 
 Then trigger and watch:

@@ -1,0 +1,17 @@
+[project]
+name = "sysdesign-task-contract"
+version = "0.1.0"
+description = "The only vocabulary the API and worker share: task NAMES (strings on the broker) plus a minimal send-only Celery client. Depending on this instead of on worker code is what lets the two services deploy, scale, and fail independently."
+requires-python = ">=3.13"
+dependencies = [
+  # The client half of Celery only. The worker's @task registration, pools, and beat
+  # schedule all live in sysdesign-worker; this package never imports worker code.
+  "celery>=5.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["task_contract"]

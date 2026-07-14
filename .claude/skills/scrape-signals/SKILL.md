@@ -21,10 +21,10 @@ Steps 2 to 4 are what `scrape_ig.py` does in one run. Step 1 is a single curl yo
 
 ## Prerequisites
 
-1. The API is running. From `backend/`: `make api`. Confirm with `curl -s localhost:8000/health`.
-2. The db is migrated. From `backend/`: `make migrate` (or `make db-init`, which also seeds
+1. The API is running. From the repo root: `moon run api:dev`. Confirm with `curl -s localhost:8000/health`.
+2. The db is migrated. From the repo root: `moon run core:migrate` (or `moon run core:db-init`, which also seeds
    synthetic volume for the drills). Migration alone is enough for the scrape loop.
-3. `APIFY_API_KEY` is in `backend/.env` (gitignored). `scrape_ig.py` reads it from there or the env.
+3. `APIFY_API_KEY` is in the repo-root `.env` (gitignored). `scrape_ig.py` reads it from there or the env.
 
 ## Step 1: seed the watchlist (curl)
 
@@ -45,7 +45,7 @@ curl -sX POST localhost:8000/influencers \
   -d '{"name": "Nick Saraev", "instagram_handle": "nick_saraev"}'
 ```
 
-Both upsert on `instagram_handle`, so re-running never duplicates a creator. (`make db-init`
+Both upsert on `instagram_handle`, so re-running never duplicates a creator. (`moon run core:db-init`
 seeds the same watchlist offline, reading the same `watchlist.json`, so if you ran that you
 can skip this step.)
 
@@ -54,8 +54,8 @@ can skip this step.)
 From the repo root, with the API running:
 
 ```bash
-uv run --project backend python .claude/skills/scrape-signals/scrape_ig.py             # all influencers
-uv run --project backend python .claude/skills/scrape-signals/scrape_ig.py --handle nick_saraev --limit 30
+uv run python .claude/skills/scrape-signals/scrape_ig.py             # all influencers
+uv run python .claude/skills/scrape-signals/scrape_ig.py --handle nick_saraev --limit 30
 ```
 
 It GETs `/influencers`, scrapes each in parallel via the Apify REST

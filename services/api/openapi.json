@@ -1,0 +1,1689 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "sysdesign API",
+    "description": "Thin API over the Module 1 influencer-intelligence schema. FastAPI generates the OpenAPI spec automatically: machine-readable at /openapi.json, Swagger UI at /docs, ReDoc at /redoc. The Module 2 frontend codegens a typed client from that spec.",
+    "version": "0.2.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Health"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
+      }
+    },
+    "/influencers": {
+      "get": {
+        "tags": [
+          "influencers"
+        ],
+        "summary": "List Influencers",
+        "operationId": "list_influencers",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Influencer"
+                  },
+                  "type": "array",
+                  "title": "Response List Influencers"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "influencers"
+        ],
+        "summary": "Create Influencer",
+        "operationId": "create_influencer",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InfluencerIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Influencer"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
+      }
+    },
+    "/influencers/bulk": {
+      "post": {
+        "tags": [
+          "influencers"
+        ],
+        "summary": "Create Influencers",
+        "description": "Seed the whole watchlist in one call. Same idempotent upsert as the single POST, run\nonce per row inside a single transaction. This is how the scrape-signals skill loads the\nwatchlist before scraping (POST the list, then GET it back for ids).",
+        "operationId": "create_influencers",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "$ref": "#/components/schemas/InfluencerIn"
+                },
+                "type": "array",
+                "title": "Infs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Influencer"
+                  },
+                  "type": "array",
+                  "title": "Response Create Influencers"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
+      }
+    },
+    "/influencers/{influencer_id}": {
+      "patch": {
+        "tags": [
+          "influencers"
+        ],
+        "summary": "Update Watermark",
+        "description": "Advance the incremental-scrape watermark. The scraper calls this after a run so the\nnext run only pulls posts newer than last_scraped_at.",
+        "operationId": "update_watermark",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "influencer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Influencer Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InfluencerWatermark"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Influencer"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sources": {
+      "get": {
+        "tags": [
+          "sources"
+        ],
+        "summary": "List Sources",
+        "operationId": "list_sources",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "influencer_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Influencer Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Source"
+                  },
+                  "title": "Response List Sources"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "sources"
+        ],
+        "summary": "Create Source",
+        "operationId": "create_source",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Source"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/signals": {
+      "post": {
+        "tags": [
+          "signals"
+        ],
+        "summary": "Create Signal",
+        "description": "Idempotent write. content_hash is derived server-side, so identical payloads dedupe no\nmatter who sends them. Returns inserted=False when the exact signal already existed. The\nactual upsert is common.signals.insert_signal, the same function the Celery worker calls,\nso there's literally one write path.",
+        "operationId": "create_signal",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignalIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignalInsertResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "signals"
+        ],
+        "summary": "List Signals",
+        "description": "A time window is REQUIRED so the query always carries the partition key and prunes.\nFiltering by influencer alone (no window) would fan out across every partition, so the\nAPI simply doesn't offer that shape.",
+        "operationId": "list_signals",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "description": "start of window (inclusive)",
+              "title": "From"
+            },
+            "description": "start of window (inclusive)"
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "description": "end of window (exclusive)",
+              "title": "To"
+            },
+            "description": "end of window (exclusive)"
+          },
+          {
+            "name": "influencer_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Influencer Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Signal"
+                  },
+                  "title": "Response List Signals"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rollup": {
+      "get": {
+        "tags": [
+          "rollup"
+        ],
+        "summary": "Rollup",
+        "description": "Reads the precomputed daily_signal_rollup matview, not raw_signals. The dashboard\nnever pays for the aggregate. Refresh happens out of band (moon run core:seed / a scheduled job).",
+        "operationId": "rollup",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "influencer_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Influencer Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DailyRollup"
+                  },
+                  "title": "Response Rollup"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Create Run",
+        "description": "Kick off a fan-out scrape. The API's half of the split: write the durable record (the\nruns row), then hand off by task NAME over the broker. The worker's dispatch task builds\nthe per-influencer chord; this process never imports worker code (see task_contract).\nReturns immediately (202-style): the work happens in the worker, watch it on the stream.\nIf the worker is down the row simply sits in 'queued' until one picks it up.\n\nAn unknown provider or a missing provider key is rejected HERE with a 400, before any\ntask is enqueued. Fail at the door: a bad model string should never make it into the\nqueue where it would surface as N retry-looping worker tasks instead of one clear error.",
+        "operationId": "create_run",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunTrigger"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "List Runs",
+        "description": "Recent runs, newest first. The dashboard's run history.",
+        "operationId": "list_runs",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Run"
+                  },
+                  "title": "Response List Runs"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{run_id}": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Get Run",
+        "description": "A run's current state, straight from Postgres (the durable record). This is the\nsnapshot a client can read at any time, no stream needed.",
+        "operationId": "get_run",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/stream": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Stream Run",
+        "description": "Server-Sent Events: live progress for one run, across BOTH phases.\n\nThe run lifecycle is queued -> running -> (rating) -> completed/failed, and the stream\nsurfaces it as four event types:\n  - `progress`: one per influencer during the scrape phase.\n  - `scrape_done`: the scrape chord fanned in and the rollup refreshed. If a model is in\n    play the run is now in `rating` (NOT finished), and this is the cue to switch the UI\n    from \"scraping X/N\" to \"rating Y/M\".\n  - `rating`: one per signal rated, carrying rated/rate_total. Decoupled from the scrape\n    chord by design (a slow model never blocks the fan-in), so these arrive after\n    `scrape_done`.\n  - `done`: the run reached a TERMINAL state. The worker owns this decision, it emits\n    `done` at fan-in when there's no rating work, or when the last rating lands. The\n    stream's only job is to relay deltas and close on `done`.\n\nThe refresh-proof pattern, in order:\n  1. subscribe to the Redis channel FIRST, so no delta published during step 2 is lost.\n  2. read the runs row from Postgres and send it as the `snapshot` event. A client that\n     connects late, or reconnects after a page refresh, gets the true current state here.\n  3. if the run is already terminal on connect, send `done` and close.\n  4. otherwise relay deltas and close when a `done` arrives.\n\nA refresh just reopens this endpoint. There's no per-user registration to lose: the run_id\nin the URL is the whole subscription, and the snapshot re-establishes state every time.\n(Reconnecting mid-rating-drain is safe: we subscribe before reading the snapshot, so the\n`done` that ends the rating phase either is already reflected in the snapshot as a terminal\nstatus, or arrives on the channel after we're listening.)",
+        "operationId": "stream_run",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ratings": {
+      "get": {
+        "tags": [
+          "ratings"
+        ],
+        "summary": "List Ratings",
+        "description": "Recent ratings, newest first. min_relevance filters to what the model considered\non-thesis, which is the view the Module 5 digest agent will eventually read.",
+        "operationId": "list_ratings",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "min_relevance",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 1,
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Relevance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Rating"
+                  },
+                  "title": "Response List Ratings"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/digests": {
+      "post": {
+        "tags": [
+          "digests"
+        ],
+        "summary": "Create Digest",
+        "description": "Mint a queued digest row and return it. Not a trigger, a row factory: the digest agent\n(started by a deployment, packages/agents/deployment.yaml) calls this as its first step to get an id,\nwrites the digest, then completes the row via PUT /digests/{id}/content.",
+        "operationId": "create_digest",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Digest"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "digests"
+        ],
+        "summary": "List Digests",
+        "description": "Recent digests, newest first.",
+        "operationId": "list_digests",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Digest"
+                  },
+                  "title": "Response List Digests"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/digests/{digest_id}": {
+      "get": {
+        "tags": [
+          "digests"
+        ],
+        "summary": "Get Digest",
+        "description": "One digest's current state, content included once the agent has delivered.",
+        "operationId": "get_digest",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "digest_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Digest Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Digest"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/digests/{digest_id}/stream": {
+      "get": {
+        "tags": [
+          "digests"
+        ],
+        "summary": "Stream Digest",
+        "description": "Server-Sent Events: live narration of one digest agent session.\n\nThis is a RELAY, two streams glued back to back. Upstream, the worker holds the\nAnthropic session event stream and republishes the interesting events as deltas on\nRedis channel digest:{id}. Downstream, this endpoint turns those deltas into SSE.\nThe UI couples to our API only; which vendor runs the agent is the worker's secret.\n\nEvent types, in the order a healthy run emits them:\n  - `snapshot`: the digests row on connect (always first; refresh-proof state).\n  - `status`: the worker created the session, carries session_id for the trace link.\n  - `agent_message` / `tool` / `custom_tool` / `custom_tool_result`: narration,\n    \"what is the agent doing right now\", for a ticker UI.\n  - `done`: terminal verdict (completed/failed), decided by the WORKER after its\n    final row check, because completion is judged by the database (the agent's PUT),\n    never by how the transcript looked. Stream closes on it.\n\nSame refresh-proof choreography as /runs/{run_id}/stream: subscribe FIRST, then\nsnapshot from Postgres, then relay; a client connecting after the run ended gets\nsnapshot + done and closes without ever touching Redis history (there is none,\npub/sub is fire-and-forget; the row is the durable record).",
+        "operationId": "stream_digest",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "digest_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Digest Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/digests/{digest_id}/content": {
+      "put": {
+        "tags": [
+          "digests"
+        ],
+        "summary": "Deliver Digest",
+        "description": "The agent's delivery door. The digest agent calls this from its sandbox with the\nfinished markdown, authenticated by the same vaulted X-API-Key as every data route.\nStoring the content IS what completes the run; the worker watching the session only\nmarks failure if the stream ends and this call never arrived.\n\nPUT because delivery is idempotent by design: re-delivering the same digest (an\nagent retrying a flaky request) just overwrites the row with the same content, no\nduplicate rows, no counter to corrupt.",
+        "operationId": "deliver_digest",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "digest_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Digest Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DigestContent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Digest"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "DailyRollup": {
+        "properties": {
+          "influencer_id": {
+            "type": "integer",
+            "title": "Influencer Id"
+          },
+          "day": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Day"
+          },
+          "signal_count": {
+            "type": "integer",
+            "title": "Signal Count"
+          },
+          "source_count": {
+            "type": "integer",
+            "title": "Source Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "influencer_id",
+          "day",
+          "signal_count",
+          "source_count"
+        ],
+        "title": "DailyRollup"
+      },
+      "Digest": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "content_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Md"
+          },
+          "word_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Word Count"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "session_id",
+          "content_md",
+          "word_count",
+          "error",
+          "created_at",
+          "completed_at"
+        ],
+        "title": "Digest"
+      },
+      "DigestContent": {
+        "properties": {
+          "content_md": {
+            "type": "string",
+            "title": "Content Md"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content_md"
+        ],
+        "title": "DigestContent"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Influencer": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "instagram_handle": {
+            "type": "string",
+            "title": "Instagram Handle"
+          },
+          "last_scraped_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Scraped At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "instagram_handle",
+          "last_scraped_at",
+          "created_at"
+        ],
+        "title": "Influencer"
+      },
+      "InfluencerIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "instagram_handle": {
+            "type": "string",
+            "title": "Instagram Handle"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "instagram_handle"
+        ],
+        "title": "InfluencerIn"
+      },
+      "InfluencerWatermark": {
+        "properties": {
+          "last_scraped_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Scraped At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "last_scraped_at"
+        ],
+        "title": "InfluencerWatermark"
+      },
+      "Rating": {
+        "properties": {
+          "content_hash": {
+            "type": "string",
+            "title": "Content Hash"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "relevance": {
+            "type": "number",
+            "title": "Relevance"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Topics"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "rated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Rated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content_hash",
+          "model",
+          "relevance",
+          "confidence",
+          "topics",
+          "summary",
+          "rated_at"
+        ],
+        "title": "Rating"
+      },
+      "Run": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "done_count": {
+            "type": "integer",
+            "title": "Done Count"
+          },
+          "inserted": {
+            "type": "integer",
+            "title": "Inserted"
+          },
+          "rated_count": {
+            "type": "integer",
+            "title": "Rated Count",
+            "default": 0
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "mode",
+          "total",
+          "done_count",
+          "inserted",
+          "error",
+          "created_at",
+          "started_at",
+          "finished_at"
+        ],
+        "title": "Run"
+      },
+      "RunCreated": {
+        "properties": {
+          "run_id": {
+            "type": "integer",
+            "title": "Run Id"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "total",
+          "mode"
+        ],
+        "title": "RunCreated"
+      },
+      "RunTrigger": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "live",
+              "demo"
+            ],
+            "title": "Mode",
+            "default": "live"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "default": 5
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "title": "RunTrigger"
+      },
+      "Signal": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "influencer_id": {
+            "type": "integer",
+            "title": "Influencer Id"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "captured_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Captured At"
+          },
+          "content_hash": {
+            "type": "string",
+            "title": "Content Hash"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "influencer_id",
+          "source_id",
+          "captured_at",
+          "content_hash",
+          "payload"
+        ],
+        "title": "Signal"
+      },
+      "SignalIn": {
+        "properties": {
+          "influencer_id": {
+            "type": "integer",
+            "title": "Influencer Id"
+          },
+          "captured_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Captured At"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "influencer_id",
+          "captured_at",
+          "payload"
+        ],
+        "title": "SignalIn"
+      },
+      "SignalInsertResult": {
+        "properties": {
+          "inserted": {
+            "type": "boolean",
+            "title": "Inserted"
+          },
+          "content_hash": {
+            "type": "string",
+            "title": "Content Hash"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inserted",
+          "content_hash"
+        ],
+        "title": "SignalInsertResult"
+      },
+      "Source": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "influencer_id": {
+            "type": "integer",
+            "title": "Influencer Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "influencer_id",
+          "kind",
+          "url",
+          "created_at"
+        ],
+        "title": "Source"
+      },
+      "SourceIn": {
+        "properties": {
+          "influencer_id": {
+            "type": "integer",
+            "title": "Influencer Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "influencer_id",
+          "kind",
+          "url"
+        ],
+        "title": "SourceIn"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "APIKeyHeader": {
+        "type": "apiKey",
+        "description": "Required on data routes when the deployment sets SYSDESIGN_API_KEY.",
+        "in": "header",
+        "name": "X-API-Key"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "health",
+      "description": "Liveness + db reachability."
+    },
+    {
+      "name": "influencers",
+      "description": "The creators we track (Defrag watchlist)."
+    },
+    {
+      "name": "sources",
+      "description": "Where an influencer's signals come from."
+    },
+    {
+      "name": "signals",
+      "description": "The partitioned raw_signals firehose."
+    },
+    {
+      "name": "rollup",
+      "description": "Precomputed daily counts (materialized view)."
+    },
+    {
+      "name": "runs",
+      "description": "Background fan-out scrape jobs + live SSE progress."
+    },
+    {
+      "name": "ratings",
+      "description": "Per-signal AI ratings, keyed on content_hash."
+    },
+    {
+      "name": "digests",
+      "description": "Weekly agent-written digests (Module 5). The agent delivers its own result via PUT."
+    }
+  ]
+}

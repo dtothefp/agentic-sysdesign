@@ -3,8 +3,8 @@
   "dockerComposeFile": "compose.yml",
   "service": "workspace",
   "workspaceFolder": "/workspace",
-  "postCreateCommand": "cd backend && uv sync",
-  "postStartCommand": "echo 'Dev container ready. Postgres is a sibling at db:5432 (no host port). First time: cd backend, then run make db-init, then make drills.'",
+  "postCreateCommand": "uv sync --all-packages",
+  "postStartCommand": "echo 'Dev container ready. Postgres is a sibling at db:5432 (no host port). First time: moon run core:db-init, then moon run core:drills (from the repo root).'",
   "customizations": {
     "vscode": {
       "extensions": [

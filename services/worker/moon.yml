@@ -1,0 +1,34 @@
+# moon project: the Celery worker service. Same system-toolchain pattern as api: uv owns
+# the interpreter and deps, moon owns the task graph and affected-detection.
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+stack: 'backend'
+layer: 'application'
+language: 'python'
+
+dependsOn:
+  - 'core'
+  - 'task-contract'
+
+tasks:
+  dev:
+    command: 'uv run --package sysdesign-worker celery -A worker.celery_app worker --loglevel INFO --concurrency 4'
+    toolchain: 'system'
+    options:
+      cache: false
+      persistent: true
+
+  # celery beat is a separate singleton process; run alongside `moon run worker:dev`.
+  beat:
+    command: 'uv run --package sysdesign-worker celery -A worker.celery_app beat --loglevel INFO'
+    toolchain: 'system'
+    options:
+      cache: false
+      persistent: true
+
+  lint:
+    script: 'uv run ruff check . && uv run ruff format --check .'
+    toolchain: 'system'
+    inputs:
+      - 'worker/**/*.py'
+      - '/pyproject.toml'

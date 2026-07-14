@@ -1,0 +1,11 @@
+# Toolchains moon manages. Deliberately empty for now: every task runs `toolchain: system`
+# and shells out to uv, which already owns the Python version (requires-python) and the one
+# workspace .venv. Letting moon ALSO manage a Python would give the interpreter two owners.
+# When apps/chat-web grows real code, add the node toolchain here so moon pins the node
+# version. Keep the JS side per-app and self-contained: chat-web owns its own package.json,
+# lockfile, and node_modules (installed in place), with NO root package.json and NO package
+# manager workspace. There is no shared JS to link, the API boundary is a generated client
+# codegen'd from services/api/openapi.json, so a workspace would buy nothing. Prefer npm
+# (ships with node) or bun over pnpm. If shared JS ever appears, moon works with npm or bun
+# workspaces too, so this isn't a one-way door.
+$schema: 'https://moonrepo.dev/schemas/toolchain.json'

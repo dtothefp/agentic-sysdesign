@@ -1,0 +1,14 @@
+[project]
+name = "sysdesign-agents"
+version = "0.1.0"
+description = "Module 5 Managed Agents infra: agent.yaml/deployment.yaml/environment.yaml declarative configs and agentctl.py (a thin `ant` CLI wrapper). agentctl is a SCRIPT, not an importable module; this member exists so `uv sync` provides its pyyaml and CI can keep driving it with plain python + pip (see .github/actions/setup-ant)."
+requires-python = ">=3.13"
+dependencies = [
+  "pyyaml>=6.0",
+]
+
+# Nothing to build or install as a package; uv just resolves the dependencies into the
+# workspace venv. agentctl.py reaches common.env through an explicit sys.path insert so
+# the plain-python CI path (no uv, no venv) keeps working too.
+[tool.uv]
+package = false

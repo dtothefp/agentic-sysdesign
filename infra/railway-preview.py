@@ -10,7 +10,7 @@ locally too:
     python3 infra/railway-preview.py down 42           # delete env pr-42
 
 Auth is the WORKSPACE token (env var RAILWAY_WORKSPACE_TOKEN, falls back to the
-same key in backend/.env; sent as "Authorization: Bearer"). The project-scoped
+same key in the repo-root .env; sent as "Authorization: Bearer"). The project-scoped
 token that drives railway-env.py CANNOT be used here: it's scoped to the
 production environment, so it can create a new environment but then can't read,
 retarget, or delete it (verified empirically 2026-07-10). In CI the token comes
@@ -25,12 +25,16 @@ What "up" does, in order, all idempotent:
   2. deploymentTriggerUpdate on every cloned trigger (api + worker) so they
      track the PR branch instead of main. After this, pushes to the PR branch
      auto-deploy to the preview env, no Action run needed.
-  3. serviceDomainCreate for the api if it doesn't have one (clones don't copy
+  3. serviceInstanceUpdate on api + worker to pin rootDirectory + the
+     railway.json path (SERVICE_SOURCE below). Clones inherit production's
+     settings, so a PR that moves those files would otherwise build the branch
+     with the old paths and fail before its own config is ever read.
+  4. serviceDomainCreate for the api if it doesn't have one (clones don't copy
      domains). Railway assigns something like api-pr-42.up.railway.app.
-  4. serviceInstanceDeployV2 for redis, worker, api, the initial deploys that
+  5. serviceInstanceDeployV2 for redis, worker, api, the initial deploys that
      step 1 skipped.
 
-Migrations do NOT run in preview environments. railway.api.json scopes
+Migrations do NOT run in preview environments. services/api/railway.json scopes
 preDeployCommand to the production environment because previews share the
 production Supabase database.
 """
@@ -44,7 +48,7 @@ import urllib.request
 from pathlib import Path
 
 GQL = "https://backboard.railway.com/graphql/v2"
-ENV_FILE = Path(__file__).resolve().parent.parent / "backend" / ".env"
+ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
 PROJECT_ID = "12dffbd4-65bd-44f7-83b7-d30238c92892"  # sysdesign
 PROD_ENVIRONMENT_ID = "530d245e-d3f1-478d-b622-04e9426d7470"  # production
@@ -57,6 +61,14 @@ SERVICES = {
 # redis first so the broker is coming up while api/worker build
 DEPLOY_ORDER = ["redis", "worker", "api"]
 
+# Where each repo-backed service's source lives on THIS branch. Applied to the
+# cloned instances every `up`, so previews always build with the checked-out
+# layout even while production's settings still point at an older one.
+SERVICE_SOURCE = {
+    "api": {"rootDirectory": "/", "railwayConfigFile": "/services/api/railway.json"},
+    "worker": {"rootDirectory": "/", "railwayConfigFile": "/services/worker/railway.json"},
+}
+
 
 def load_token() -> str:
     if os.environ.get("RAILWAY_WORKSPACE_TOKEN"):
@@ -66,7 +78,7 @@ def load_token() -> str:
             if line.startswith("RAILWAY_WORKSPACE_TOKEN="):
                 return line.split("=", 1)[1].strip()
     sys.exit(
-        "RAILWAY_WORKSPACE_TOKEN not set (env var or backend/.env). This must be "
+        "RAILWAY_WORKSPACE_TOKEN not set (env var or the repo-root .env). This must be "
         "a workspace token, not the project token; see infra/README.md."
     )
 
@@ -125,12 +137,18 @@ def cmd_up(token: str, pr: str, branch: str) -> None:
         m = """mutation($input: EnvironmentCreateInput!) {
           environmentCreate(input: $input) { id }
         }"""
-        env_id = gql(token, m, {"input": {
-            "projectId": PROJECT_ID,
-            "name": name,
-            "sourceEnvironmentId": PROD_ENVIRONMENT_ID,
-            "skipInitialDeploys": True,
-        }})["environmentCreate"]["id"]
+        env_id = gql(
+            token,
+            m,
+            {
+                "input": {
+                    "projectId": PROJECT_ID,
+                    "name": name,
+                    "sourceEnvironmentId": PROD_ENVIRONMENT_ID,
+                    "skipInitialDeploys": True,
+                }
+            },
+        )["environmentCreate"]["id"]
         print(f"created environment {name} ({env_id})")
 
     detail = environment_detail(token, env_id)
@@ -147,6 +165,14 @@ def cmd_up(token: str, pr: str, branch: str) -> None:
         else:
             print(f"trigger {trig['serviceId'][:8]}: already on {branch}")
 
+    # pin api + worker source paths to this branch's layout (clones inherit prod's)
+    m = """mutation($serviceId: String!, $environmentId: String!, $input: ServiceInstanceUpdateInput!) {
+      serviceInstanceUpdate(serviceId: $serviceId, environmentId: $environmentId, input: $input)
+    }"""
+    for svc, source in SERVICE_SOURCE.items():
+        gql(token, m, {"serviceId": SERVICES[svc], "environmentId": env_id, "input": source})
+        print(f"source pinned: {svc} -> {source['railwayConfigFile']}")
+
     # the api needs a Railway-provided domain (domains aren't cloned)
     domain = None
     for edge in detail["serviceInstances"]["edges"]:
@@ -157,9 +183,16 @@ def cmd_up(token: str, pr: str, branch: str) -> None:
         m = """mutation($input: ServiceDomainCreateInput!) {
           serviceDomainCreate(input: $input) { domain }
         }"""
-        domain = gql(token, m, {"input": {
-            "environmentId": env_id, "serviceId": SERVICES["api"],
-        }})["serviceDomainCreate"]["domain"]
+        domain = gql(
+            token,
+            m,
+            {
+                "input": {
+                    "environmentId": env_id,
+                    "serviceId": SERVICES["api"],
+                }
+            },
+        )["serviceDomainCreate"]["domain"]
         print(f"created api domain {domain}")
 
     for svc in DEPLOY_ORDER:

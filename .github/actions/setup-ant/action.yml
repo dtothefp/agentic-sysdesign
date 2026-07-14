@@ -1,5 +1,5 @@
 # Installs the `ant` CLI (the Claude Platform control-plane CLI) plus the pyyaml
-# that m5_agents/agentctl.py needs. Shared by agent-deploy.yml and preview-env.yml.
+# that packages/agents/agentctl.py needs. Shared by agent-deploy.yml and preview-env.yml.
 #
 # There is no dedicated marketplace action for `ant`, so this composes two maintained
 # ones (actions/setup-go, actions/setup-python) with Anthropic's own documented install

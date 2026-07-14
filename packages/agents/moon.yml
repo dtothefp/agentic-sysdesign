@@ -1,0 +1,47 @@
+# moon project: Module 5 Managed Agents infra (declarative YAML + agentctl.py, a thin
+# `ant` CLI wrapper). deploy/run/list are the local hand-cranks over the same script CI
+# drives (.github/workflows/agent-deploy.yml). They need ANTHROPIC_API_KEY (for `ant`)
+# and SYSDESIGN_API_KEY (for the vault credentials) in the environment; agentctl reads
+# shared resource ids from resources.json. Parameterized via env vars, same shape as the
+# old make targets:
+#
+#   TIER=local RUN=1 moon run agents:deploy    # BRANCH defaults to the current branch
+#   TIER=local moon run agents:run
+#   moon run agents:list
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+stack: 'backend'
+layer: 'tool'
+language: 'python'
+
+tasks:
+  deploy:
+    script: |
+      TIER="${TIER:-local}"
+      BRANCH="${BRANCH:-$(git branch --show-current)}"
+      uv run python agentctl.py deploy --tier "$TIER" ${BRANCH:+--branch "$BRANCH"} ${PR:+--pr "$PR"} ${BASE_URL:+--base-url "$BASE_URL"} ${RUN:+--run}
+    toolchain: 'system'
+    options:
+      cache: false
+
+  run:
+    script: |
+      TIER="${TIER:-local}"
+      BRANCH="${BRANCH:-$(git branch --show-current)}"
+      uv run python agentctl.py run --tier "$TIER" ${BRANCH:+--branch "$BRANCH"} ${PR:+--pr "$PR"}
+    toolchain: 'system'
+    options:
+      cache: false
+
+  list:
+    command: 'uv run python agentctl.py list'
+    toolchain: 'system'
+    options:
+      cache: false
+
+  lint:
+    script: 'uv run ruff check . && uv run ruff format --check .'
+    toolchain: 'system'
+    inputs:
+      - '*.py'
+      - '/pyproject.toml'

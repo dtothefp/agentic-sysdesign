@@ -3,13 +3,13 @@
 # This is standalone on purpose. It does NOT include ../docker-compose.yml, because
 # Compose *appends* port mappings across included files rather than replacing them,
 # so including the root compose would drag its `5432:5432` host publish in here and
-# collide with a host-run `make up`. The dev container reaches Postgres over the
+# collide with a host-run `moon run root:up`. The dev container reaches Postgres over the
 # internal compose network at db:5432, so it never needs to publish 5432 on the host.
 # Result: you can run the host stack and the dev container at the same time.
 #
 # This db is a separate volume from the host one, so it starts empty. Seed it once
-# from a dev-container terminal with `make db-init` (the db is already running as a
-# sibling here, so use db-init, not the host-only `make setup`).
+# from a dev-container terminal with `moon run core:db-init` (the db is already running
+# as a sibling here, so use db-init, not the host-only `moon run root:setup`).
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -42,8 +42,8 @@ services:
   # which is the whole point: the rating adapter talks the same wire shape here as it does
   # to DeepSeek or Groq in prod (own the interface, rent the model). CPU inference in a VM
   # is slow (a handful of tokens/sec), fine for rating one caption at a time. The model
-  # itself isn't baked into the image; pull it once with `make ollama-pull` (persists in
-  # the ollama volume across rebuilds).
+  # itself isn't baked into the image; pull it once with `moon run root:ollama-pull`
+  # (persists in the ollama volume across rebuilds).
   ollama:
     image: ollama/ollama
     volumes:
@@ -56,17 +56,17 @@ services:
     volumes:
       - ..:/workspace:cached
     command: sleep infinity
-    # Load backend/.env into the container's environment (same pattern as the beeks
+    # Load the root .env into the container's environment (same pattern as the beeks
     # devcontainer, but pointed at the one secrets file this repo already has instead
     # of a second copy under .devcontainer/). Python processes never needed this
-    # (common/env.py fills os.environ from backend/.env on import), but the SHELL did:
+    # (common/env.py fills os.environ from the root .env on import), but the SHELL did:
     # this is what makes `curl -H "X-API-Key: $SYSDESIGN_API_KEY" ...` work in a
     # container terminal. Values bake in at container create, so after editing
-    # backend/.env, rebuild/restart the dev container to see changes in the shell.
+    # .env, rebuild/restart the dev container to see changes in the shell.
     # The explicit `environment:` block below always wins over env_file, so the
     # compose-owned URLs (db, redis, ollama) can't be clobbered from .env.
     env_file:
-      - path: ../backend/.env
+      - path: ../.env
         required: false
     environment:
       DATABASE_URL: postgresql://lab:lab@db:5432/sysdesign

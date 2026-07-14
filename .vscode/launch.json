@@ -3,7 +3,7 @@
   // or F5). Both point at the container venv (/home/vscode/.venv, set via
   // UV_PROJECT_ENVIRONMENT in .devcontainer/compose.yml).
   //
-  // Two deliberate differences from the `make api` / `make worker` commands:
+  // Two deliberate differences from the `moon run api:dev` / `moon run worker:dev` commands:
   //   * API: no --reload. The uvicorn reloader spawns a child process and breakpoints
   //     bind to the parent, so they never fire. Restart the debug session after edits.
   //   * Worker: --pool solo. Celery's default prefork pool forks child processes the
@@ -18,7 +18,7 @@
       "request": "launch",
       "module": "uvicorn",
       "args": ["api.main:app", "--host", "0.0.0.0", "--port", "8000"],
-      "cwd": "${workspaceFolder}/backend",
+      "cwd": "${workspaceFolder}",
       "python": "/home/vscode/.venv/bin/python",
       "console": "integratedTerminal",
       "justMyCode": false,
@@ -35,7 +35,7 @@
       "request": "launch",
       "module": "celery",
       "args": ["-A", "worker.celery_app", "worker", "--loglevel", "INFO", "--pool", "solo"],
-      "cwd": "${workspaceFolder}/backend",
+      "cwd": "${workspaceFolder}",
       "python": "/home/vscode/.venv/bin/python",
       "console": "integratedTerminal",
       "justMyCode": false,
@@ -50,8 +50,8 @@
   "compounds": [
     {
       // Launch both, then POST /runs and step through the whole fan-out. Breakpoints to
-      // try: api/main.py create_run, worker/tasks.py scrape_influencer + finalize_run,
-      // api/main.py stream_run's gen() while a curl -N is attached.
+      // try: services/api create_run, worker/tasks.py scrape_influencer + finalize_run (services/worker),
+      // services/api stream_run's gen() while a curl -N is attached.
       "name": "Debug API + Worker",
       "configurations": ["Debug API (FastAPI)", "Debug Celery Worker"],
       "stopAll": true

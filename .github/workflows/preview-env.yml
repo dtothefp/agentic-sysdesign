@@ -62,7 +62,6 @@ jobs:
       # the `down` job archives it. This is the one place the per-PR URL is known.
       - uses: ./.github/actions/setup-ant
       - name: Deploy the preview digest agent
-        working-directory: backend
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SYSDESIGN_API_KEY: ${{ secrets.SYSDESIGN_API_KEY }}
@@ -70,7 +69,7 @@ jobs:
           PREVIEW_URL: ${{ steps.up.outputs.PREVIEW_URL }}
           GIT_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          python m5_agents/agentctl.py deploy --tier preview \
+          python packages/agents/agentctl.py deploy --tier preview \
             --pr "$PR_NUMBER" --base-url "$PREVIEW_URL" --sha "$GIT_SHA"
 
   down:
@@ -89,8 +88,7 @@ jobs:
 
       - uses: ./.github/actions/setup-ant
       - name: Tear down the preview digest agent
-        working-directory: backend
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: python m5_agents/agentctl.py teardown --tier preview --pr "$PR_NUMBER"
+        run: python packages/agents/agentctl.py teardown --tier preview --pr "$PR_NUMBER"

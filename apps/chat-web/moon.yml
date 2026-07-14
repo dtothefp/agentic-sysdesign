@@ -1,0 +1,14 @@
+# moon project: the Module 7 chat agent frontend (React over the API's runs/signals
+# surface + the digest agent). Scaffold only for now; tasks and package.json arrive with
+# the code (the frontend scaffolder writes them). This app is self-contained: its own
+# package.json + lockfile + node_modules, no root package.json, no PM workspace. When you
+# build it, add the node toolchain to .moon/toolchain.yml (npm or bun, not pnpm) and codegen
+# the typed API client from services/api's openapi task output (`moon run api:openapi`).
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+stack: 'frontend'
+layer: 'application'
+language: 'typescript'
+
+dependsOn:
+  - 'api'
