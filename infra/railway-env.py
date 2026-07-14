@@ -31,6 +31,11 @@ SERVICES = {
     "api": "96b5d402-727f-4f2a-bce0-5818e2b7973e",
     "worker": "adb815cd-c5dc-4868-80d6-2f64e82b28eb",
     "redis": "3551ca6b-210e-41ce-b49d-e1f4ca0faa9e",
+    # The Module 7 chat agent. Provisioned lazily: create the Railway service, then put its id in
+    # the repo-root .env as RAILWAY_AGENT_SERVICE_ID and it's injected here at runtime (see main).
+    # Empty until then, and the list/sync loops skip an id-less service, so this file is valid and
+    # runnable before the service exists.
+    "agent": "",
 }
 
 # One Redis URL template, three consumers. ${{...}} is Railway's reference syntax,
@@ -93,6 +98,28 @@ MANIFEST = {
         # either environment's key can be revoked without touching the other. This key lives ONLY
         # in Railway, never in the repo-root .env, since it has no local use. env_optional means: push it
         # from .env when it happens to be present (the rotation path), else leave Railway's be.
+        "LANGSMITH_API_KEY": ("env_optional", "LANGSMITH_API_KEY_PROD"),
+    },
+    "agent": {
+        # The chat agent is a CLIENT of the data API, not fused into it: no DATABASE_URL, no
+        # Redis, no Apify. Its whole job is the LLM ReAct loop plus HTTP calls to the api, so its
+        # blast radius is just those two things. That separation is the point of the two planes.
+        #
+        # Where its tools dial the data API. The public api domain (proven: the digest agent uses
+        # the same host). The api enforces X-API-Key, so SYSDESIGN_API_KEY below both authenticates
+        # the agent AS a client here AND gates the agent's own /chat surface (server.py). One key,
+        # two directions.
+        "SYSDESIGN_API_URL": ("literal", "https://sysdesign.thedefrag.ai"),
+        "SYSDESIGN_API_KEY": ("env", "SYSDESIGN_API_KEY"),
+        # The agent runs the model loop itself (loop.py), so it needs the Anthropic key directly,
+        # unlike the api (which only validates a run's model at the door).
+        "ANTHROPIC_API_KEY": ("env", "ANTHROPIC_API_KEY"),
+        # LangSmith tracing for the agent loop (agent_turn chain + LLM + tool spans). Same
+        # inert-until-keyed contract and same prod project as the worker, so agent and rating
+        # traces land side by side under sysdesign-prod. Prod's own key, Railway-only.
+        "LANGSMITH_TRACING": ("literal", "true"),
+        "LANGSMITH_ENDPOINT": ("literal", "https://api.smith.langchain.com"),
+        "LANGSMITH_PROJECT": ("literal", "sysdesign-prod"),
         "LANGSMITH_API_KEY": ("env_optional", "LANGSMITH_API_KEY_PROD"),
     },
     # redis's own REDIS_PASSWORD is deliberately NOT managed here. It was generated
@@ -176,6 +203,9 @@ def redact(name: str, value: str) -> str:
 
 def cmd_list(token: str) -> None:
     for svc, svc_id in SERVICES.items():
+        if not svc_id:
+            print(f"\n[{svc}] skipped (no service id; set RAILWAY_{svc.upper()}_SERVICE_ID in .env)")
+            continue
         print(f"\n[{svc}]")
         for name, value in sorted(remote_vars(token, svc_id).items()):
             print(f"  {name} = {redact(name, value)}")
@@ -186,6 +216,9 @@ def cmd_sync(token: str, dry: bool) -> None:
     upsert = """mutation($input: VariableUpsertInput!) { variableUpsert(input: $input) }"""
     for svc, wanted in MANIFEST.items():
         svc_id = SERVICES[svc]
+        if not svc_id:
+            print(f"  {svc}: skipped (no service id; set RAILWAY_{svc.upper()}_SERVICE_ID in .env once the service exists)")
+            continue
         current = remote_vars(token, svc_id)
         for name, entry in wanted.items():
             value = resolve(entry, dotenv)
@@ -224,7 +257,11 @@ def main() -> None:
     args = sys.argv[1:]
     if not args or args[0] not in ("list", "sync"):
         sys.exit(__doc__)
-    token = load_dotenv().get("RAILWAY_PROJECT_TOKEN") or sys.exit("RAILWAY_PROJECT_TOKEN missing from the repo-root .env")
+    env = load_dotenv()
+    token = env.get("RAILWAY_PROJECT_TOKEN") or sys.exit("RAILWAY_PROJECT_TOKEN missing from the repo-root .env")
+    # Lazily-provisioned services read their id from .env, so this file stays valid pre-provision.
+    if env.get("RAILWAY_AGENT_SERVICE_ID"):
+        SERVICES["agent"] = env["RAILWAY_AGENT_SERVICE_ID"]
     if args[0] == "list":
         cmd_list(token)
     else:

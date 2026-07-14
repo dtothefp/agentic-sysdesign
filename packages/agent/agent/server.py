@@ -16,14 +16,42 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import secrets
 
-from fastapi import FastAPI
+from common.env import load_local_env
+from fastapi import Depends, FastAPI, HTTPException, Request, Security
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from .loop import run_agent
 
-app = FastAPI(title="sysdesign chat agent", version="0.1.0")
+load_local_env()  # so SYSDESIGN_API_KEY (the /chat gate) resolves from the workspace-root .env locally
+
+
+# Same inert-until-keyed gate as services/api (api/main.py require_api_key), one shared key on the
+# X-API-Key header. The agent already holds SYSDESIGN_API_KEY to authenticate to the data API as a
+# client (tools.py); reusing it to gate its OWN /chat means the public chat surface is closed by
+# default in prod and open in local dev, with no second secret to manage. /health stays open so
+# Railway's headerless healthcheck passes; unset key means fully open (local dev), same contract.
+API_KEY_HEADER = APIKeyHeader(
+    name="X-API-Key",
+    auto_error=False,  # missing header -> None, we decide (else FastAPI 403s even when unkeyed)
+    description="Required on /chat when the deployment sets SYSDESIGN_API_KEY.",
+)
+
+
+def require_api_key(request: Request, key: str | None = Security(API_KEY_HEADER)) -> None:
+    expected = os.environ.get("SYSDESIGN_API_KEY")
+    if not expected or request.url.path == "/health":
+        return
+    # compare_digest, not ==, so the check is constant-time and can't leak the key byte-by-byte.
+    if key is None or not secrets.compare_digest(key, expected):
+        raise HTTPException(401, "missing or invalid X-API-Key")
+
+
+app = FastAPI(title="sysdesign chat agent", version="0.1.0", dependencies=[Depends(require_api_key)])
 
 
 class ChatIn(BaseModel):
