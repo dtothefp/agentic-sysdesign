@@ -71,6 +71,21 @@ MANIFEST = {
         # request body is only ever needed for the localhost tunnel (a process that can't
         # know its own public URL). api-only, same reason as SYSDESIGN_API_KEY above.
         "SYSDESIGN_PUBLIC_URL": ("literal", "https://${{RAILWAY_PUBLIC_DOMAIN}}"),
+        # Module 6 semantic search, query side. The api embeds the SEARCH QUERY at request time
+        # (common.search.embed_query -> embed_text) so GET /search can run the vector half of the
+        # hybrid RRF. Same OpenAI 1536-dim model the worker writes doc vectors with, so query and
+        # document embeddings share a space. Unset EMBEDDING_MODEL degrades /search to lexical-only
+        # ("semantic": false). The key lives on both services because both embed (worker writes,
+        # api queries); it's the same OPENAI_API_KEY from the app .env.
+        "EMBEDDING_MODEL": ("literal", "openai/text-embedding-3-small"),
+        "OPENAI_API_KEY": ("env", "OPENAI_API_KEY"),
+        # LangSmith tracing for the api (the embed_text span on the query path, plus any api-side
+        # traced work). Same inert-until-keyed contract and same prod project as worker/agent, so
+        # every service's traces land together under sysdesign-prod. Prod's own key, Railway-only.
+        "LANGSMITH_TRACING": ("literal", "true"),
+        "LANGSMITH_ENDPOINT": ("literal", "https://api.smith.langchain.com"),
+        "LANGSMITH_PROJECT": ("literal", "sysdesign-prod"),
+        "LANGSMITH_API_KEY": ("env_optional", "LANGSMITH_API_KEY_PROD"),
     },
     "worker": {
         "DATABASE_URL": ("env", "DATABASE_URL_SUPABASE"),
@@ -78,6 +93,14 @@ MANIFEST = {
         "CELERY_BROKER_URL": ("literal", REDIS_BASE + "/0"),
         "CELERY_RESULT_BACKEND": ("literal", REDIS_BASE + "/1"),
         "APIFY_API_KEY": ("env", "APIFY_API_KEY"),
+        # Module 6 semantic search, write side. The worker embeds each new signal's caption in the
+        # embed_signal stage (and the sweep_unembedded beat backstop) and writes the vector to
+        # signal_embeddings, which is what the api's query half searches against. Same 1536-dim
+        # OpenAI model + key as the api. Unset EMBEDDING_MODEL makes the embedding stage inert
+        # (search stays lexical-only). One-time turn-on over an existing corpus is the separate
+        # worker.backfill script; this var just keeps future signals embedded.
+        "EMBEDDING_MODEL": ("literal", "openai/text-embedding-3-small"),
+        "OPENAI_API_KEY": ("env", "OPENAI_API_KEY"),
         # Module 4 rating stage, LIVE as of 2026-07-10. Default is Groq's free tier
         # (rate-limited, plenty for this pipeline); Anthropic is the per-run quality
         # override, POST /runs {"model": "anthropic/claude-haiku-4-5"}. Keys come from
