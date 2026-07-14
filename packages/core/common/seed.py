@@ -32,15 +32,25 @@ import psycopg
 from common.db import DATABASE_URL
 from common.hashing import content_hash
 
-# Single source of truth for who we track: the skill's watchlist.json. Fallback keeps the
-# seed runnable if the skill dir isn't present (e.g. a Python-only checkout).
-_WATCHLIST_JSON = Path(__file__).resolve().parents[2] / ".claude" / "skills" / "scrape-signals" / "watchlist.json"
+# Single source of truth for who we track: the skill's watchlist.json. Walk up from this
+# file looking for the repo-root .claude/ path (packages/core/common -> 3 levels), with a
+# fallback so the seed stays runnable if the skill dir isn't present.
+_WATCHLIST_REL = Path(".claude") / "skills" / "scrape-signals" / "watchlist.json"
 _FALLBACK = [{"name": "Example Creator", "instagram_handle": "example_creator"}]
 
 
+def _find_watchlist() -> Path | None:
+    for base in [Path.cwd(), *Path(__file__).resolve().parents]:
+        candidate = base / _WATCHLIST_REL
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def load_watchlist() -> list[dict]:
-    if _WATCHLIST_JSON.exists():
-        return json.loads(_WATCHLIST_JSON.read_text())
+    path = _find_watchlist()
+    if path is not None:
+        return json.loads(path.read_text())
     return _FALLBACK
 
 
