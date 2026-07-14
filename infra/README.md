@@ -106,13 +106,13 @@ supports the DDL a migration needs).
 format. dbmate is a Go binary and this image is a uv/Python build, so rather than wrangle
 the binary into the image it reads the same `packages/core/db/migrations/*.sql` files and writes the same
 `schema_migrations` table dbmate uses, with psycopg (already a dependency). dbmate stays the
-local tool (`make migrate`, `make new`), this is the prod applier, and the two are
+local tool (`moon run core:migrate`, `NAME=... moon run core:new`), this is the prod applier, and the two are
 interchangeable, `dbmate status` reads the table the runner wrote and reports every
 migration applied. It's idempotent (already-applied versions skip), each migration commits
 atomically, and it honors a `transaction:false` marker for the `CREATE INDEX CONCURRENTLY`
 case.
 
-Local dev is unchanged, keep using `make migrate`. A `transaction:false` migration must be
+Local dev is unchanged, keep using `moon run core:migrate`. A `transaction:false` migration must be
 a single statement (Postgres won't run `CONCURRENTLY` inside an implicit transaction block).
 
 ## Deploys

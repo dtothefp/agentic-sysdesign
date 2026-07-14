@@ -3,7 +3,7 @@
   // or F5). Both point at the container venv (/home/vscode/.venv, set via
   // UV_PROJECT_ENVIRONMENT in .devcontainer/compose.yml).
   //
-  // Two deliberate differences from the `make api` / `make worker` commands:
+  // Two deliberate differences from the `moon run api:dev` / `moon run worker:dev` commands:
   //   * API: no --reload. The uvicorn reloader spawns a child process and breakpoints
   //     bind to the parent, so they never fire. Restart the debug session after edits.
   //   * Worker: --pool solo. Celery's default prefork pool forks child processes the

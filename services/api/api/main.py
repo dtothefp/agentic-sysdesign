@@ -321,7 +321,7 @@ def list_signals(
 @app.get("/rollup", response_model=list[DailyRollup], tags=["rollup"])
 def rollup(influencer_id: int | None = None):
     """Reads the precomputed daily_signal_rollup matview, not raw_signals. The dashboard
-    never pays for the aggregate. Refresh happens out of band (make seed / a scheduled job)."""
+    never pays for the aggregate. Refresh happens out of band (moon run core:seed / a scheduled job)."""
     sql = "SELECT influencer_id, day, signal_count, source_count FROM daily_signal_rollup"
     params: list = []
     if influencer_id is not None:

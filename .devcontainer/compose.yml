@@ -3,13 +3,13 @@
 # This is standalone on purpose. It does NOT include ../docker-compose.yml, because
 # Compose *appends* port mappings across included files rather than replacing them,
 # so including the root compose would drag its `5432:5432` host publish in here and
-# collide with a host-run `make up`. The dev container reaches Postgres over the
+# collide with a host-run `moon run root:up`. The dev container reaches Postgres over the
 # internal compose network at db:5432, so it never needs to publish 5432 on the host.
 # Result: you can run the host stack and the dev container at the same time.
 #
 # This db is a separate volume from the host one, so it starts empty. Seed it once
-# from a dev-container terminal with `make db-init` (the db is already running as a
-# sibling here, so use db-init, not the host-only `make setup`).
+# from a dev-container terminal with `moon run core:db-init` (the db is already running
+# as a sibling here, so use db-init, not the host-only `moon run root:setup`).
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -42,8 +42,8 @@ services:
   # which is the whole point: the rating adapter talks the same wire shape here as it does
   # to DeepSeek or Groq in prod (own the interface, rent the model). CPU inference in a VM
   # is slow (a handful of tokens/sec), fine for rating one caption at a time. The model
-  # itself isn't baked into the image; pull it once with `make ollama-pull` (persists in
-  # the ollama volume across rebuilds).
+  # itself isn't baked into the image; pull it once with `moon run root:ollama-pull`
+  # (persists in the ollama volume across rebuilds).
   ollama:
     image: ollama/ollama
     volumes:
@@ -55,6 +55,11 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ..:/workspace:cached
+      # mask the bind-mounted node_modules with a container-local volume: the host's
+      # holds the macOS moon binary and a Linux container needs its own. Same cross-OS
+      # problem UV_PROJECT_ENVIRONMENT solves for .venv below. postCreate's
+      # `pnpm install` populates it on first create.
+      - node_modules:/workspace/node_modules
     command: sleep infinity
     # Load the root .env into the container's environment (same pattern as the beeks
     # devcontainer, but pointed at the one secrets file this repo already has instead
@@ -98,3 +103,4 @@ services:
 volumes:
   pgdata:
   ollama:
+  node_modules:

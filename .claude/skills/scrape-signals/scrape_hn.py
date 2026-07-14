@@ -10,7 +10,7 @@ practice: no partition, no insert.
 Secondary example only. The primary scraper is scrape_ig.py (the Defrag watchlist). This one
 stays as a template for any source that exposes clean JSON, mapped onto the same /signals path.
 
-Usage (from the repo root, with the API running via `make api`):
+Usage (from the repo root, with the API running via `moon run api:dev`):
   uv run python .claude/skills/scrape-signals/scrape_hn.py \
       --influencer-id 1 --query "Postgres" --limit 20
 """

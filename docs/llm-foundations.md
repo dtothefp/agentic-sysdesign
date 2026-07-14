@@ -8,7 +8,7 @@ the arithmetic.
 
 ## 1. Weights, and training vs inference
 
-A model IS a file of numbers. The ~3GB that `make ollama-pull` downloads is billions of
+A model IS a file of numbers. The ~3GB that `moon run root:ollama-pull` downloads is billions of
 decimal numbers and almost nothing else. Each number is a **weight**, one tiny dial that
 answers "how much should this input influence that output." Nobody sets the dials by hand.
 qwen3:4b means 4 billion dials.

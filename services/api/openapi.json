@@ -468,7 +468,7 @@
           "rollup"
         ],
         "summary": "Rollup",
-        "description": "Reads the precomputed daily_signal_rollup matview, not raw_signals. The dashboard\nnever pays for the aggregate. Refresh happens out of band (make seed / a scheduled job).",
+        "description": "Reads the precomputed daily_signal_rollup matview, not raw_signals. The dashboard\nnever pays for the aggregate. Refresh happens out of band (moon run core:seed / a scheduled job).",
         "operationId": "rollup",
         "security": [
           {

@@ -149,19 +149,19 @@ Run everything from the repo root inside the dev container, where Postgres is a 
 ### Phase 1, clean database and migrations
 
 ```bash
-make db-empty      # drop the db, re-apply all 4 migrations from empty, seed nothing
-make status        # all 4 migrations show as applied, none pending
+moon run core:db-empty   # drop the db, re-apply all 4 migrations from empty, seed nothing
+moon run core:status     # all 4 migrations show as applied, none pending
 ```
 
-`make db-empty` is the truly-empty path (no rows at all), which is what you want when the
-skill is going to add influencers through the API. `make db-fresh` is the same clean re-migrate
-but seeds only the watchlist influencers. `make db-init` additionally loads 4000 synthetic
+`moon run core:db-empty` is the truly-empty path (no rows at all), which is what you want when the
+skill is going to add influencers through the API. `moon run core:db-fresh` is the same clean re-migrate
+but seeds only the watchlist influencers. `moon run core:db-init` additionally loads 4000 synthetic
 signals for drill volume (you'll want that for Phase 4).
 
 ### Phase 2, the API surface
 
 ```bash
-make api           # uvicorn at :8000, interactive docs at /docs
+moon run api:dev         # uvicorn at :8000, interactive docs at /docs
 ```
 
 Open `/docs` and exercise the surface. POST `/influencers/bulk` with the watchlist, GET
@@ -197,10 +197,10 @@ no-ops on a re-run, and `skipped` counts posts whose month has no partition. Nee
 
 This is the core of the module. For the plans to mean something you want volume, so run the
 full seed first, then open an interactive psql and paste one block at a time. Don't use
-`make drills` for study (it fires the whole file at once and you can't read the plans).
+`moon run core:drills` for study (it fires the whole file at once and you can't read the plans).
 
 ```bash
-make db-init                         # schema + 4000 synthetic signals for volume
+moon run core:db-init                # schema + 4000 synthetic signals for volume
 psql "postgresql://lab:lab@db:5432/sysdesign"
 # then paste blocks from packages/core/drills/explain-drills.sql one at a time
 ```
@@ -256,5 +256,5 @@ the concurrent-refresh path (and its enabling unique index) matters now rather t
 
 Module 2 adds the Celery fan-out. The `runs` table already in the schema becomes the durable
 job-of-record, Redis carries high-frequency progress, and a Next.js frontend polls it. The
-`make openapi` spec (`services/api/openapi.json`) is the codegen input for that frontend's typed
+`moon run api:openapi` spec (`services/api/openapi.json`) is the codegen input for that frontend's typed
 API client, which is why the OpenAPI surface is nailed down in Module 1.

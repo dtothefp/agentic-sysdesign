@@ -7,7 +7,7 @@
 #                         the cloudflared tunnel; deploys AND runs (you dispatch a
 #                         local deploy to watch the agent hit your laptop).
 #                       - prod:  base URL = sysdesign.thedefrag.ai; deploys only,
-#                         no run (prod is manual; trigger with `make agent-run TIER=prod`).
+#                         no run (prod is manual; trigger with `TIER=prod moon run agents:run`).
 #   Merge to main    -> upsert the prod agent + deployment so main always has a
 #                       current prod deployment. Does NOT run (a real prod system
 #                       would schedule it, see deployment.yaml).

@@ -63,8 +63,10 @@ jobs:
             https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64
           sudo chmod +x /usr/local/bin/dbmate
 
+      # dbmate invoked directly instead of through moon: this job deliberately has no
+      # node/pnpm, and the flags match packages/core/moon.yml's migrate task.
       - name: Apply migrations
-        run: make migrate
+        run: dbmate --no-dump-schema --migrations-dir packages/core/db/migrations --url "$DATABASE_URL?sslmode=disable" up
 
       - name: Test (pytest, including DB integration tests)
         run: uv run pytest

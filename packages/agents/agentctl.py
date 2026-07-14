@@ -20,7 +20,7 @@ identity, metadata carries the detail:
 All deployments are MANUAL (no schedule). A real prod system would add a cron to
 the prod deployment (see deployment.yaml); prod runs are hand-triggered for now.
 
-Usage (also driven by .github/workflows/agent-deploy.yml and `make deploy`):
+Usage (also driven by .github/workflows/agent-deploy.yml and `moon run agents:deploy`):
 
     agentctl.py deploy   --tier prod    [--sha S] [--run]
     agentctl.py deploy   --tier local   --branch B [--sha S] [--run]

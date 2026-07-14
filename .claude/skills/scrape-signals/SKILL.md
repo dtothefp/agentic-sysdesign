@@ -21,8 +21,8 @@ Steps 2 to 4 are what `scrape_ig.py` does in one run. Step 1 is a single curl yo
 
 ## Prerequisites
 
-1. The API is running. From the repo root: `make api`. Confirm with `curl -s localhost:8000/health`.
-2. The db is migrated. From the repo root: `make migrate` (or `make db-init`, which also seeds
+1. The API is running. From the repo root: `moon run api:dev`. Confirm with `curl -s localhost:8000/health`.
+2. The db is migrated. From the repo root: `moon run core:migrate` (or `moon run core:db-init`, which also seeds
    synthetic volume for the drills). Migration alone is enough for the scrape loop.
 3. `APIFY_API_KEY` is in the repo-root `.env` (gitignored). `scrape_ig.py` reads it from there or the env.
 
@@ -45,7 +45,7 @@ curl -sX POST localhost:8000/influencers \
   -d '{"name": "Nick Saraev", "instagram_handle": "nick_saraev"}'
 ```
 
-Both upsert on `instagram_handle`, so re-running never duplicates a creator. (`make db-init`
+Both upsert on `instagram_handle`, so re-running never duplicates a creator. (`moon run core:db-init`
 seeds the same watchlist offline, reading the same `watchlist.json`, so if you ran that you
 can skip this step.)
 

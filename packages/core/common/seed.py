@@ -9,7 +9,7 @@ Two distinct things get seeded, on purpose:
     handful of real posts per creator wouldn't move a query plan; 4000 rows across three
     partitions will. These are generic filler, not real content.
 
-This is the one-shot convenience so `make db-init && make drills` works. The skill does the
+This is the one-shot convenience so `moon run core:db-init && moon run core:drills` works. The skill does the
 same watchlist load through the API (POST /influencers/bulk) when Claude Code drives it live.
 Both read the same watchlist.json, so they can't drift.
 

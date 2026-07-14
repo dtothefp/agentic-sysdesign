@@ -305,7 +305,7 @@ uses the branch you dispatched from and the tunnel URL and deploys-and-runs, `pr
 prod domain and deploys without running. Preview isn't a manual option (its per-PR URL isn't
 knowable from the tier); `preview-env.yml` stands up a per-PR agent on `up` and tears it down
 on `down`, so preview agents are ephemeral. Prod also upserts on `push: main`. Locally,
-`make agent-deploy TIER=local` is the hand-crank over the identical code path.
+`TIER=local moon run agents:deploy` is the hand-crank over the identical code path.
 
 Prod runs manually for now (no `schedule` on the deployment), which is why the digest is
 triggered by hand. A real production system would put `schedule: "0 13 * * *"` on the prod

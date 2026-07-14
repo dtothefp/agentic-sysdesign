@@ -1,5 +1,5 @@
 {
-  "install": "sudo apt-get update && sudo apt-get install -y postgresql-client && curl -LsSf https://astral.sh/uv/install.sh | sh -s -- -y && $HOME/.local/bin/uv sync --all-packages",
+  "install": "sudo apt-get update && sudo apt-get install -y postgresql-client && curl -LsSf https://astral.sh/uv/install.sh | sh -s -- -y && $HOME/.local/bin/uv sync --all-packages && (command -v npm >/dev/null && sudo npm install -g pnpm@10.12.1 && pnpm install || echo 'node unavailable; moon tasks unavailable, call uv/dbmate directly')",
   "start": "docker compose up -d db",
   "terminals": [
     {

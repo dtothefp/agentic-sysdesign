@@ -7,7 +7,7 @@ directly from env vars (the same REDIS_URL split the dev container sets). Two ro
   * result backend (CELERY_RESULT_BACKEND, redis /1): where a task's return value is stored,
     which is also how a chord knows all its fan-out tasks finished before firing the callback.
 
-Start a worker from a dev-container terminal with `make worker` (and `make worker-beat` for
+Start a worker from a dev-container terminal with `moon run worker:dev` (and `moon run worker:beat` for
 the periodic refresh backstop). Tasks live in worker.tasks; include= tells Celery to import
 that module on startup so the tasks register.
 """
@@ -34,7 +34,7 @@ celery_app.conf.update(
 # matview is fresh the moment a run finishes. This periodic task only covers the gap where
 # signals arrive by some path that didn't go through a run (manual insert, a partial failure),
 # so the dashboard is never more than a few minutes stale. Runs alongside the worker via
-# `make worker-beat` (celery beat is a separate singleton process).
+# `moon run worker:beat` (celery beat is a separate singleton process).
 celery_app.conf.beat_schedule = {
     "refresh-rollup-backstop": {
         "task": "worker.tasks.refresh_rollup_task",

@@ -6,10 +6,17 @@
 # This dir doubles as the workspace-root marker common/env.py anchors its .env search on.
 $schema: 'https://moonrepo.dev/schemas/workspace.json'
 
+# Mixed form: globs for the three tiers, plus an explicit root project. The root
+# project (moon.yml at the repo root) owns workspace-level lifecycle tasks that
+# belong to no single member: docker compose up/down, setup/reset, ollama-pull,
+# and lint/format for loose files (infra/, .claude/skills/).
 projects:
-  - 'apps/*'
-  - 'services/*'
-  - 'packages/*'
+  globs:
+    - 'apps/*'
+    - 'services/*'
+    - 'packages/*'
+  sources:
+    root: '.'
 
 vcs:
   client: 'git'

@@ -1,6 +1,14 @@
 # moon project: the shared domain layer (import name `common`) plus db/ (migrations +
 # the prod migrate.py applier). Library tier: never deploys on its own, everything else
 # depends on it.
+#
+# This project also owns the db LIFECYCLE tasks (migrate/seed/drills/...) because it owns
+# the migrations and the seed module. Tasks run from this directory (moon's default), so
+# paths like db/migrations are project-relative. Every db task defaults DATABASE_URL to
+# the local compose Postgres via the `:=` shell idiom, so an exported DATABASE_URL (the
+# dev container sets ...@db:5432) always wins over the default. dbmate gets sslmode=disable
+# appended (local containers speak no TLS) and --no-dump-schema (the migration files are
+# the source of truth, no generated schema.sql to keep in sync).
 $schema: 'https://moonrepo.dev/schemas/project.json'
 
 stack: 'backend'
@@ -8,6 +16,112 @@ layer: 'library'
 language: 'python'
 
 tasks:
+  # apply every pending migration in order (db/migrations/*.sql).
+  migrate:
+    script: |
+      command -v dbmate >/dev/null || { echo "dbmate not found. Preinstalled in the dev container; on the host: brew install dbmate"; exit 1; }
+      : "${DATABASE_URL:=postgresql://lab:lab@localhost:5432/sysdesign}"
+      dbmate --no-dump-schema --migrations-dir db/migrations --url "$DATABASE_URL?sslmode=disable" up
+    toolchain: 'system'
+    options:
+      cache: false
+
+  # undo the most recent migration (its migrate:down block).
+  rollback:
+    script: |
+      : "${DATABASE_URL:=postgresql://lab:lab@localhost:5432/sysdesign}"
+      dbmate --no-dump-schema --migrations-dir db/migrations --url "$DATABASE_URL?sslmode=disable" down
+    toolchain: 'system'
+    options:
+      cache: false
+
+  # show which migrations have run and which are pending.
+  status:
+    script: |
+      : "${DATABASE_URL:=postgresql://lab:lab@localhost:5432/sysdesign}"
+      dbmate --no-dump-schema --migrations-dir db/migrations --url "$DATABASE_URL?sslmode=disable" status
+    toolchain: 'system'
+    options:
+      cache: false
+
+  # scaffold a new timestamped migration: NAME=add_events_index moon run core:new
+  # (env var, not a positional arg: moon doesn't forward `--` args into script tasks)
+  new:
+    script: |
+      [ -n "$NAME" ] || { echo "usage: NAME=add_events_index moon run core:new"; exit 1; }
+      : "${DATABASE_URL:=postgresql://lab:lab@localhost:5432/sysdesign}"
+      dbmate --no-dump-schema --migrations-dir db/migrations --url "$DATABASE_URL?sslmode=disable" new "$NAME"
+    toolchain: 'system'
+    options:
+      cache: false
+
+  # full seed: the watchlist AND 4000 synthetic signals, so the EXPLAIN drills have volume.
+  seed:
+    script: |
+      : "${DATABASE_URL:=postgresql://lab:lab@localhost:5432/sysdesign}"
+      uv run --package sysdesign-core python -m common.seed
+      psql "$DATABASE_URL" -c "REFRESH MATERIALIZED VIEW daily_signal_rollup;"
+    toolchain: 'system'
+    options:
+      cache: false
+
+  # seed ONLY the watchlist influencers (from the skill's watchlist.json). No signal volume.
+  seed-influencers:
+    command: 'uv run --package sysdesign-core python -m common.seed --influencers-only'
+    toolchain: 'system'
+    options:
+      cache: false
+
+  # migrate + full seed against whatever DATABASE_URL points at, WITHOUT starting a
+  # container. Use inside the dev container (Postgres is a sibling at db:5432). On the
+  # host, prefer `moon run root:setup`. Use db-fresh for a clean db with just influencers.
+  db-init:
+    script: 'echo "db initialized at ${DATABASE_URL:-postgresql://lab:lab@localhost:5432/sysdesign}"'
+    toolchain: 'system'
+    deps:
+      - '~:migrate'
+      - '~:seed'
+    options:
+      cache: false
+      runDepsInParallel: false
+
+  # DEV CONTAINER clean slate: drop the whole db, re-apply every migration from empty, then
+  # seed ONLY the influencers (no synthetic signals, no leftover rows). Stop api:dev first,
+  # since an open connection blocks DROP DATABASE.
+  db-fresh:
+    script: |
+      : "${DATABASE_URL:=postgresql://lab:lab@localhost:5432/sysdesign}"
+      dbmate --no-dump-schema --migrations-dir db/migrations --url "$DATABASE_URL?sslmode=disable" drop || true
+      dbmate --no-dump-schema --migrations-dir db/migrations --url "$DATABASE_URL?sslmode=disable" up
+      uv run --package sysdesign-core python -m common.seed --influencers-only
+      echo "fresh db at $DATABASE_URL: migrations applied, influencers seeded, no signals. run 'moon run core:seed' later if you want drill volume."
+    toolchain: 'system'
+    options:
+      cache: false
+
+  # DEV CONTAINER truly empty: drop + re-migrate, seed NOTHING. Use when the scrape-signals
+  # skill should add the influencers through the API instead of the Python seed. Stop
+  # api:dev first (an open connection blocks DROP DATABASE).
+  db-empty:
+    script: |
+      : "${DATABASE_URL:=postgresql://lab:lab@localhost:5432/sysdesign}"
+      dbmate --no-dump-schema --migrations-dir db/migrations --url "$DATABASE_URL?sslmode=disable" drop || true
+      dbmate --no-dump-schema --migrations-dir db/migrations --url "$DATABASE_URL?sslmode=disable" up
+      echo "empty db at $DATABASE_URL: migrations applied, no rows. add influencers via the scrape-signals skill."
+    toolchain: 'system'
+    options:
+      cache: false
+
+  # fire all six EXPLAIN drills at once (smoke test). To study one plan at a time,
+  # open an interactive psql instead.
+  drills:
+    script: |
+      : "${DATABASE_URL:=postgresql://lab:lab@localhost:5432/sysdesign}"
+      psql "$DATABASE_URL" -f drills/explain-drills.sql
+    toolchain: 'system'
+    options:
+      cache: false
+
   lint:
     script: 'uv run ruff check . && uv run ruff format --check .'
     toolchain: 'system'

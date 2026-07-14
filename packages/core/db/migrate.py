@@ -7,7 +7,7 @@ the same `schema_migrations` table, and is idempotent, already-applied versions 
 Why this exists instead of dbmate in prod. dbmate is a Go binary and the Railway image is a
 uv/Python (Railpack) build with no dbmate in it. Rather than wrangle a binary into the image,
 this reads dbmate's file format faithfully with psycopg (already a dependency). dbmate stays
-the local dev tool (`make migrate`), this is the prod applier, and both agree because they
+the local dev tool (`moon run core:migrate`), this is the prod applier, and both agree because they
 share the files and the `schema_migrations` table.
 
 dbmate file format, everything before `-- migrate:up` is header comments, the up SQL runs

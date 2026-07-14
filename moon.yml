@@ -1,0 +1,84 @@
+# moon root project: workspace-level lifecycle tasks that belong to no single member.
+# moon replaced the Makefile outright (it's the one task runner, no make wrapping):
+# db lifecycle lives in packages/core (it owns the migrations), agent hand-cranks in
+# packages/agents, per-service dev tasks in services/*. This file keeps only what is
+# genuinely workspace-scoped: the compose stack, setup/reset, and lint/format for the
+# loose Python that lives outside every project (infra/, .claude/skills/).
+#
+# Workspace-wide sweeps use moon's all-projects syntax instead of a root wrapper:
+#   moon run :lint    # every project's lint (including this root one)
+#   moon run :test    # every project's test suite
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+layer: 'tool'
+language: 'python'
+
+tasks:
+  # HOST: start the compose Postgres (publishes 5432) and wait until it answers.
+  up:
+    script: |
+      docker compose up -d db
+      echo "waiting for postgres..."
+      until docker compose exec -T db pg_isready -U lab -d sysdesign >/dev/null 2>&1; do sleep 1; done
+      echo "postgres ready on 5432"
+    toolchain: 'system'
+    options:
+      cache: false
+
+  down:
+    command: 'docker compose down -v'
+    toolchain: 'system'
+    options:
+      cache: false
+
+  # host one-shot: bring the db up, then migrate + full seed. Serial deps: the db must
+  # be answering before core:db-init runs against it.
+  setup:
+    script: 'echo "ready. run \"moon run core:drills\", or open: psql postgresql://lab:lab@localhost:5432/sysdesign"'
+    toolchain: 'system'
+    deps:
+      - '~:up'
+      - 'core:db-init'
+    options:
+      cache: false
+      runDepsInParallel: false
+
+  reset:
+    script: 'echo "reset complete"'
+    toolchain: 'system'
+    deps:
+      - '~:down'
+      - '~:setup'
+    options:
+      cache: false
+      runDepsInParallel: false
+
+  # DEV CONTAINER: pull the Module 4 local rating model into the ollama sibling service.
+  # One-time (the model persists in the `ollama` compose volume). Uses Ollama's native
+  # /api/pull because the OpenAI-compat layer only covers inference, not model management.
+  # llama3.2:1b on purpose: small and non-thinking, so it answers inside the adapter's
+  # 180s timeout on container CPU (see .devcontainer/compose.yml for the qwen3 story).
+  ollama-pull:
+    script: |
+      curl -sf http://ollama:11434/api/pull -d '{"model": "llama3.2:1b"}'
+      echo "pulled llama3.2:1b"
+    toolchain: 'system'
+    options:
+      cache: false
+
+  # lint the loose Python no project owns. Members lint their own trees, so
+  # `moon run :lint` = this + every project = full workspace coverage.
+  lint:
+    script: 'uv run ruff check infra .claude && uv run ruff format --check infra .claude'
+    toolchain: 'system'
+    inputs:
+      - 'infra/**/*.py'
+      - '.claude/**/*.py'
+      - 'pyproject.toml'
+
+  # auto-apply ruff's formatter across the WHOLE workspace (one writer, unlike lint).
+  format:
+    command: 'uv run ruff format .'
+    toolchain: 'system'
+    options:
+      cache: false

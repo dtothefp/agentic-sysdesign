@@ -19,7 +19,7 @@ who to scrape, POST /signals for each post, PATCH /influencers/{id} to advance t
 Apify: the REST run-sync-get-dataset-items endpoint runs the actor and returns its dataset
 in one blocking call, no MCP, no SDK. APIFY_API_KEY is read from the environment or the repo-root .env.
 
-Usage (from the repo root, with the API running via `make api`):
+Usage (from the repo root, with the API running via `moon run api:dev`):
   uv run python .claude/skills/scrape-signals/scrape_ig.py
   uv run python .claude/skills/scrape-signals/scrape_ig.py --handle nick_saraev --limit 30
 """
