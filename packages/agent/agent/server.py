@@ -1,5 +1,10 @@
 """SSE transport: a tiny FastAPI app that streams the agent loop to a browser.
 
+>>> PARTIALLY STRIPPED FOR STUDY. The app, the /health route, and the X-API-Key gate are left
+>>> intact so tests/test_server_auth.py passes out of the box and you have a working, secured
+>>> surface. The one thing to build is the /chat handler's sync->async streaming bridge, the most
+>>> interesting async idea in the file. See BUILD_FROM_SCRATCH.md.
+
 This is the bridge to the future chat-web (Next.js) UI. It's a separate process from
 services/api on purpose, because the agent is a CLIENT of the data API, not part of it: it gets
 its own /chat surface on its own port (8100) and dials the api over HTTP like any other client.
@@ -23,9 +28,9 @@ from common.env import load_local_env
 from fastapi import Depends, FastAPI, HTTPException, Request, Security
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
-from sse_starlette.sse import EventSourceResponse
+from sse_starlette.sse import EventSourceResponse  # noqa: F401 - for the /chat SSE handler you build
 
-from .loop import run_agent
+from .loop import run_agent  # noqa: F401 - you'll use this in the /chat handler you build
 
 load_local_env()  # so SYSDESIGN_API_KEY (the /chat gate) resolves from the workspace-root .env locally
 
@@ -67,13 +72,31 @@ def health() -> dict:
 @app.post("/chat")
 async def chat(body: ChatIn):
     """Stream one agent turn as SSE. Each event's `event:` field is the loop event type
-    (text, tool_use, tool_result, done, error) and `data:` is the JSON event."""
+    (text, tool_use, tool_result, done, error) and `data:` is the JSON event.
 
-    def _events():
+    >>> BUILD THIS. run_agent is a SYNC generator, so you cannot just `for ev in run_agent(...)`
+    >>> inside this async handler without blocking the event loop for the whole model call. The
+    >>> pattern:
+    >>>   1. define an async `gen()` that returns the events one at a time
+    >>>   2. get the sync iterator without blocking the loop:
+    >>>        `it = await asyncio.to_thread(lambda: run_agent(body.message, history=body.history))`
+    >>>   3. loop, pulling each next event off the thread pool with a sentinel to detect exhaustion:
+    >>>        sentinel = object()
+    >>>        while True:
+    >>>            ev = await asyncio.to_thread(next, it, sentinel)
+    >>>            if ev is sentinel: break
+    >>>            yield {"event": ev["type"], "data": json.dumps(ev, default=str)}
+    >>>   4. return EventSourceResponse(gen())
+    >>>
+    >>> asyncio.to_thread: https://docs.python.org/3/library/asyncio-task.html#asyncio.to_thread
+    >>> sse-starlette EventSourceResponse: https://github.com/sysid/sse-starlette
+    """
+
+    def _get_events():
         return run_agent(body.message, history=body.history)
 
     async def gen():
-        it = await asyncio.to_thread(_events)
+        it = await asyncio.to_thread(_get_events)
         sentinel = object()
         while True:
             ev = await asyncio.to_thread(next, it, sentinel)

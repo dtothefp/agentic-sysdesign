@@ -1,5 +1,9 @@
 """The ReAct loop. This is the whole product; the CLI and the SSE server are just transports.
 
+>>> STRIPPED FOR STUDY. The two functions below are hollowed out to `raise NotImplementedError`.
+>>> Your job is to fill them in. The unit tests in tests/test_loop.py are the spec: run them red,
+>>> make them green. See BUILD_FROM_SCRATCH.md for the algorithm, the async bits, and doc links.
+
 The mechanics, which are exactly what a code challenge pokes at:
 
   1. Send the running transcript plus the tool schemas to the model.
@@ -27,16 +31,21 @@ import os
 from collections.abc import Callable, Iterator
 from typing import Any
 
+from anthropic import Anthropic
 from common.env import load_local_env
 
-from ._trace import traceable, wrap_anthropic
-from .tools import Toolbox, default_toolbox
+from ._trace import traceable, wrap_anthropic  # noqa: F401 - wrap_anthropic is for the anthropic_complete you build
+from .tools import TOOL_SCHEMAS, run_tool
 
 load_local_env()  # so ANTHROPIC_API_KEY (and the LANGSMITH_* tracing vars) from the root .env are
 # present before Anthropic() and the first traced call read them
 
+_anthropic_client = wrap_anthropic(Anthropic())  # one client per process, reused across turns
+
 DEFAULT_MODEL = os.environ.get("CHAT_MODEL", "claude-sonnet-5")
-MAX_TOKENS = 1024
+MAX_TOKENS = 4096  # cap on the model's output per turn. Big enough that a long summary isn't
+# truncated mid-sentence (a real bug the Python prod agent hit at 1024). Interview note: this is
+# an OUTPUT cap, not the context window.
 
 SYSTEM = (
     "You are the sysdesign assistant, a data agent over Defrag's influencer-intelligence system. "
@@ -54,22 +63,49 @@ SYSTEM = (
 Complete = Callable[[list[dict], list[dict], str, str], Iterator[dict]]
 
 
-def anthropic_complete(messages: list[dict], tool_schemas: list[dict], system: str, model: str) -> Iterator[dict]:
-    """The real model call: one streamed turn off the Anthropic SDK. Yields text deltas as they
-    arrive (that's the token streaming the UI shows), then normalizes the final message's content
-    blocks into plain dicts so the rest of the loop never touches SDK objects."""
-    from anthropic import Anthropic
+def simple_complete(
+    messages: list[dict],
+    tool_schemas: list[dict],  # noqa: ARG001 - real completes pass tool schemas to the model
+    system: str,  # noqa: ARG001
+    model: str,  # noqa: ARG001
+) -> Iterator[dict]:
+    """Toy `complete` for learning the contract. No Anthropic client, no network.
 
-    # wrap_anthropic makes this streamed call a LangSmith LLM span (prompt, tools, response, tokens)
-    # when tracing is on, and is a no-op identity wrapper otherwise. See _trace.py.
-    client = wrap_anthropic(Anthropic())  # reads ANTHROPIC_API_KEY from the environment
-    with client.messages.stream(
-        model=model,
-        max_tokens=MAX_TOKENS,
-        system=system,
-        tools=tool_schemas,
-        messages=messages,
-    ) as stream:
+    `complete` means "one model turn": stream some tokens, then hand back one final message.
+    `run_agent` calls it once per loop iteration and owns the transcript (messages list).
+
+    Try it in a REPL:
+        list(simple_complete([{"role": "user", "content": "hello"}], [], SYSTEM, "fake"))
+    """
+    last = messages[-1]["content"] if messages else ""
+    if isinstance(last, list):
+        # After a tool round, Anthropic-shaped transcripts carry tool_result blocks here.
+        reply = "Thanks, I saw your tool results."
+    else:
+        reply = f"You said: {last}"
+
+    for word in reply.split():
+        yield {"type": "text_delta", "text": word + " "}
+
+    yield {
+        "type": "final",
+        "content": [{"type": "text", "text": reply}],
+        "stop_reason": "end_turn",
+    }
+
+
+def anthropic_complete(messages: list[dict], tool_schemas: list[dict], system: str, model: str) -> Iterator[dict]:
+    """One streamed model turn via the Anthropic SDK. No tools until tool_schemas is non-empty."""
+    stream_kwargs: dict = {
+        "model": model,
+        "max_tokens": MAX_TOKENS,
+        "system": system,
+        "messages": messages,
+    }
+    if tool_schemas:
+        stream_kwargs["tools"] = tool_schemas
+
+    with _anthropic_client.messages.stream(**stream_kwargs) as stream:
         for text in stream.text_stream:
             yield {"type": "text_delta", "text": text}
         final = stream.get_final_message()
@@ -80,6 +116,7 @@ def anthropic_complete(messages: list[dict], tool_schemas: list[dict], system: s
             content.append({"type": "text", "text": block.text})
         elif block.type == "tool_use":
             content.append({"type": "tool_use", "id": block.id, "name": block.name, "input": block.input})
+
     yield {"type": "final", "content": content, "stop_reason": final.stop_reason}
 
 
@@ -94,8 +131,6 @@ def _turn_inputs(inputs: dict) -> dict:
 def run_agent(
     user_message: str,
     *,
-    complete: Complete | None = None,
-    toolbox: Toolbox | None = None,
     system: str = SYSTEM,
     model: str = DEFAULT_MODEL,
     max_turns: int = 8,
@@ -106,33 +141,50 @@ def run_agent(
       {"type":"text","text":..}                              a streamed answer token
       {"type":"tool_use","id":..,"name":..,"input":..}       the model asked to call a tool
       {"type":"tool_result","id":..,"name":..,"ok":bool,"result":..}   what the tool returned
+      {"type":"final","content":[..],"stop_reason":..}        full assistant message for this turn
       {"type":"done","stop_reason":..,"turns":n}             terminal, the answer is complete
       {"type":"error","error":..}                            no final message, or max_turns hit
 
     Pass `history` (prior [{"role","content"}] messages) to continue a multi-turn chat.
-    """
-    complete = complete or anthropic_complete
-    toolbox = toolbox if toolbox is not None else default_toolbox()
-    schemas = toolbox.schemas
 
-    messages: list[dict] = list(history or [])
-    messages.append({"role": "user", "content": user_message})
+    >>> BUILD THIS. tests/test_loop.py is the spec. The shape it asserts:
+    >>>   * default the seams: complete = complete or anthropic_complete;
+    >>>     toolbox = toolbox if toolbox is not None else default_toolbox(); schemas = toolbox.schemas
+    >>>   * seed the transcript: messages = list(history or []) + one {"role":"user","content":user_message}
+    >>>   * loop `for turn in range(1, max_turns + 1)`:
+    >>>       - drive `complete(messages, schemas, system, model)`: re-yield each text_delta as a
+    >>>         {"type":"text",...} event, and capture the single {"type":"final",...}
+    >>>       - if no final came back, yield an error event and return
+    >>>       - append the assistant turn: messages.append({"role":"assistant","content": final["content"]})
+    >>>       - if stop_reason != "tool_use": yield the done event {stop_reason, turns:turn} and return
+    >>>       - else for each tool_use block: yield a tool_use event, run it through the toolbox
+    >>>         (toolbox.run(name, input)), catch ANY exception into an is_error result so one bad
+    >>>         tool can't kill the turn, yield a tool_result event, and collect an Anthropic
+    >>>         tool_result block {"type":"tool_result","tool_use_id":id,"content": json.dumps(result),
+    >>>         "is_error": not ok}. After the blocks, append them as ONE user turn.
+    >>>   * fell out of the loop => yield an error event: f"hit max_turns={max_turns} without a final answer"
+    >>>
+    >>> The three tests to make green: tool-call-then-answer, tool-error-is-recoverable, max_turns_guard.
+    >>> Python generators + `yield`: https://docs.python.org/3/howto/functional.html#generators
+    """
+    messages = list(history or []) + [{"role": "user", "content": user_message}]
 
     for turn in range(1, max_turns + 1):
         final: dict | None = None
-        for ev in complete(messages, schemas, system, model):
+        for ev in anthropic_complete(messages, TOOL_SCHEMAS, system, model):
             if ev["type"] == "text_delta":
                 yield {"type": "text", "text": ev["text"]}
             elif ev["type"] == "final":
                 final = ev
 
-        if final is None:  # a well-behaved complete always yields a final; guard anyway
+        if final is None:
             yield {"type": "error", "error": "model produced no final message"}
             return
 
         messages.append({"role": "assistant", "content": final["content"]})
 
         if final["stop_reason"] != "tool_use":
+            yield {"type": "final", "content": final["content"], "stop_reason": final["stop_reason"]}
             yield {"type": "done", "stop_reason": final["stop_reason"], "turns": turn}
             return
 
@@ -142,7 +194,7 @@ def run_agent(
                 continue
             yield {"type": "tool_use", "id": block["id"], "name": block["name"], "input": block["input"]}
             try:
-                result: Any = toolbox.run(block["name"], block["input"])
+                result: Any = run_tool(block["name"], block["input"])
                 ok = True
             except Exception as e:  # noqa: BLE001 - a failing tool must be recoverable, not fatal
                 result = f"{type(e).__name__}: {e}"
