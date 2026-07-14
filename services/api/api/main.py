@@ -686,6 +686,17 @@ def deliver_digest(digest_id: int, body: DigestContent):
     return row
 
 
+@app.get("/teapot", status_code=418, include_in_schema=False)
+def teapot():
+    """Easter egg: I'm a teapot!"""
+    return {
+        "error": "I'm a teapot",
+        "message": "This API cannot brew coffee because it is, permanently, a teapot.",
+        "hint": "Try /vibes instead for something more useful",
+        "rfc": "RFC 2324"
+    }
+
+
 @app.get("/vibes", response_model=Vibes, tags=["vibes"])
 def get_vibes():
     """Check the vibes of your influencer data with creative, entertaining insights.
