@@ -29,9 +29,11 @@ from typing import Any
 
 from common.env import load_local_env
 
+from ._trace import traceable, wrap_anthropic
 from .tools import Toolbox, default_toolbox
 
-load_local_env()  # so ANTHROPIC_API_KEY from the root .env is present before Anthropic() reads it
+load_local_env()  # so ANTHROPIC_API_KEY (and the LANGSMITH_* tracing vars) from the root .env are
+# present before Anthropic() and the first traced call read them
 
 DEFAULT_MODEL = os.environ.get("CHAT_MODEL", "claude-sonnet-5")
 MAX_TOKENS = 1024
@@ -58,7 +60,9 @@ def anthropic_complete(messages: list[dict], tool_schemas: list[dict], system: s
     blocks into plain dicts so the rest of the loop never touches SDK objects."""
     from anthropic import Anthropic
 
-    client = Anthropic()  # reads ANTHROPIC_API_KEY from the environment
+    # wrap_anthropic makes this streamed call a LangSmith LLM span (prompt, tools, response, tokens)
+    # when tracing is on, and is a no-op identity wrapper otherwise. See _trace.py.
+    client = wrap_anthropic(Anthropic())  # reads ANTHROPIC_API_KEY from the environment
     with client.messages.stream(
         model=model,
         max_tokens=MAX_TOKENS,
@@ -79,6 +83,14 @@ def anthropic_complete(messages: list[dict], tool_schemas: list[dict], system: s
     yield {"type": "final", "content": content, "stop_reason": final.stop_reason}
 
 
+def _turn_inputs(inputs: dict) -> dict:
+    """What LangSmith shows as this turn's input. Keep it to the user's message and any prior
+    history; drop the injected seams (complete, toolbox, schemas, model) that would otherwise dump
+    the whole tool catalog and a function repr into the trace."""
+    return {"user_message": inputs.get("user_message"), "history": inputs.get("history")}
+
+
+@traceable(run_type="chain", name="agent_turn", process_inputs=_turn_inputs)
 def run_agent(
     user_message: str,
     *,

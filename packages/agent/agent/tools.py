@@ -24,6 +24,8 @@ from typing import Any
 import httpx
 from common.env import load_local_env
 
+from ._trace import traceable
+
 load_local_env()  # populate os.environ from the workspace-root .env (env-first, never overrides)
 
 API_URL = os.environ.get("SYSDESIGN_API_URL", "http://localhost:8000")
@@ -156,7 +158,11 @@ class Toolbox:
         tool = self._by_name.get(name)
         if tool is None:
             raise KeyError(f"unknown tool {name!r}")
-        return tool.fn(**(tool_input or {}))
+        # Trace each call as a tool span named after the tool, so LangSmith shows the input args and
+        # the HTTP result under the model turn that asked for it. traceable is a passthrough when
+        # tracing is off, so this stays a plain call in that case.
+        traced = traceable(run_type="tool", name=name)(tool.fn)
+        return traced(**(tool_input or {}))
 
 
 DEFAULT_TOOLS: list[Tool] = [

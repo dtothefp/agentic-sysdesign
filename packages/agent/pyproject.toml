@@ -10,6 +10,7 @@ dependencies = [
   "fastapi>=0.115",     # the /chat SSE transport (server.py)
   "uvicorn[standard]>=0.30",
   "sse-starlette>=2.1", # EventSourceResponse, same SSE primitive services/api already uses
+  "langsmith>=0.10.2",  # optional tracing (wrap_anthropic + @traceable); inert until LANGSMITH_TRACING=true
 ]
 
 [tool.uv.sources]
