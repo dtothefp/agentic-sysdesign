@@ -149,20 +149,24 @@ class Toolbox:
 
     def __init__(self, tools: list[Tool]):
         self._by_name = {t.name: t for t in tools}
+        # Wrap each tool's callable once as a LangSmith "tool" span named after the tool, so a call
+        # shows up under the agent turn with its input args and its HTTP result (errors included, as
+        # a failed span). traceable is a passthrough when tracing is off (see _trace.py), so this is
+        # a plain call in that case, and the wrapper reads the tracing-enabled state per call, not
+        # here, so it still honors inert-until-keyed if the env is flipped later.
+        self._traced: dict[str, Callable[..., Any]] = {
+            t.name: traceable(run_type="tool", name=t.name)(t.fn) for t in tools
+        }
 
     @property
     def schemas(self) -> list[dict]:
         return [{"name": t.name, "description": t.description, "input_schema": t.input_schema} for t in self._by_name.values()]
 
     def run(self, name: str, tool_input: dict | None) -> Any:
-        tool = self._by_name.get(name)
-        if tool is None:
+        fn = self._traced.get(name)
+        if fn is None:
             raise KeyError(f"unknown tool {name!r}")
-        # Trace each call as a tool span named after the tool, so LangSmith shows the input args and
-        # the HTTP result under the model turn that asked for it. traceable is a passthrough when
-        # tracing is off, so this stays a plain call in that case.
-        traced = traceable(run_type="tool", name=name)(tool.fn)
-        return traced(**(tool_input or {}))
+        return fn(**(tool_input or {}))
 
 
 DEFAULT_TOOLS: list[Tool] = [
