@@ -120,6 +120,18 @@ def get_digest(digest_id: int) -> dict:
         return r.json()
 
 
+def search_signals(q: str, limit: int = 20) -> dict:
+    """Find signals by what they're ABOUT, not by time or score. The Module 6 hybrid search:
+    Postgres full-text plus pgvector, fused with RRF. This is how the chat agent answers content
+    questions ('what have creators said about MCP?', 'any posts on evals?') that the time-windowed
+    and rating-filtered lists can't. Each hit reports which halves found it and a fused score; the
+    response's `semantic` flag is false when no embedding model is keyed (lexical-only, still useful)."""
+    with _client() as c:
+        r = c.get("/search", params={"q": q, "limit": limit})
+        r.raise_for_status()
+        return r.json()
+
+
 @dataclass(frozen=True)
 class Tool:
     name: str
@@ -209,6 +221,20 @@ DEFAULT_TOOLS: list[Tool] = [
         "Get one digest including its markdown content by id.",
         {"type": "object", "properties": {"digest_id": {"type": "integer"}}, "required": ["digest_id"]},
         get_digest,
+    ),
+    Tool(
+        "search_signals",
+        "Search signals by topic/content (hybrid full-text + semantic). Use this for 'what did "
+        "creators say about X' questions the time-windowed and rating lists can't answer.",
+        {
+            "type": "object",
+            "properties": {
+                "q": {"type": "string", "description": "free-text query; supports quoted phrases and -negation"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "max hits (default 20)"},
+            },
+            "required": ["q"],
+        },
+        search_signals,
     ),
 ]
 
