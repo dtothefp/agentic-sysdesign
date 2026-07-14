@@ -3,8 +3,16 @@
   "dockerComposeFile": "compose.yml",
   "service": "workspace",
   "workspaceFolder": "/workspace",
-  "postCreateCommand": "uv sync --all-packages",
-  "postStartCommand": "echo 'Dev container ready. Postgres is a sibling at db:5432 (no host port). First time: moon run core:db-init, then moon run core:drills (from the repo root).'",
+  // Node 22 on PATH for services/agent-ts (the TypeScript chat agent). The devcontainer
+  // feature installs node/npm globally at image build time — no nvm, no shell sourcing.
+  // Matches package.json engines (>=20); 22 is the current LTS line.
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "22"
+    }
+  },
+  "postCreateCommand": "bash -lc 'uv sync --all-packages && cd services/agent-ts && npm ci'",
+  "postStartCommand": "echo 'Dev container ready. Postgres is a sibling at db:5432 (no host port). First time: moon run core:db-init, then moon run core:drills (from the repo root). Node $(node --version) is on PATH for services/agent-ts.'",
   "customizations": {
     "vscode": {
       "extensions": [

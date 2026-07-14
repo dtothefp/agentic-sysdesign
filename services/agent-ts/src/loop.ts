@@ -1,8 +1,5 @@
 // The ReAct loop. This is the whole product; the CLI and the SSE server are just transports.
 //
-// >>> STRIPPED FOR STUDY. Start with anthropicComplete (one streamed model call, no tools), then
-// >>> grow runAgent into the full ReAct loop. See BUILD_FROM_SCRATCH.md and REFERENCE.md.
-//
 // The one real difference from the Python agent is concurrency: runAgent is a NATIVE async
 // generator. Every await (model stream, tool fetch) yields the event loop, so server.ts just
 // `for await`s it directly. No asyncio.to_thread bridge.
@@ -36,10 +33,7 @@ export async function* simpleComplete(
   _model: string,
 ): AsyncIterable<CompleteEvent> {
   const last = messages.at(-1)?.content ?? "";
-  const reply =
-    typeof last === "string"
-      ? `You said: ${last}`
-      : "Thanks, I saw your tool results.";
+  const reply = typeof last === "string" ? `You said: ${last}` : "Thanks, I saw your tool results.";
 
   for (const word of reply.split(/\s+/)) {
     yield { type: "text_delta", text: word + " " };

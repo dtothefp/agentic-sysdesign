@@ -1,0 +1,45 @@
+# moon project: the Module 7 chat agent (TypeScript). Parallel of packages/agent — same ReAct
+# loop and /chat SSE contract, native async generators. Node 22 on PATH (devcontainer feature).
+# Run `npm ci` here once after clone (postCreate does it); moon tasks call node_modules/.bin
+# directly so you never need to type npm run.
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+stack: 'backend'
+layer: 'application'
+language: 'typescript'
+
+tasks:
+  # the SSE transport on :8100. moon run agent-ts:dev
+  dev:
+    command: 'node_modules/.bin/tsx watch src/index.ts'
+    toolchain: 'system'
+    options:
+      cache: false
+      persistent: true
+
+  # one agent turn to stdout. PROMPT='hello' moon run agent-ts:chat
+  chat:
+    script: |
+      [ -n "$PROMPT" ] || { echo "usage: PROMPT='your question' moon run agent-ts:chat"; exit 1; }
+      node_modules/.bin/tsx src/cli.ts "$PROMPT"
+    toolchain: 'system'
+    options:
+      cache: false
+
+  typecheck:
+    command: 'node_modules/.bin/tsc --noEmit -p tsconfig.test.json'
+    toolchain: 'system'
+    inputs:
+      - 'src/**/*.ts'
+      - 'test/**/*.ts'
+      - 'tsconfig.json'
+      - 'tsconfig.test.json'
+
+  test:
+    command: 'node_modules/.bin/tsx --test test/loop.test.ts'
+    toolchain: 'system'
+    inputs:
+      - 'src/**/*.ts'
+      - 'test/**/*.ts'
+      - 'package.json'
+      - 'package-lock.json'

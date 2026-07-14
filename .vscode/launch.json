@@ -16,6 +16,11 @@
   //     bind to the parent, so they never fire. Restart the debug session after edits.
   //   * Worker uses --pool solo. Celery's default prefork pool forks children the debugger
   //     can't follow; solo runs every task in the main thread so breakpoints actually hit.
+  //
+  // TypeScript agent (services/agent-ts): Node 22 is on PATH (devcontainer feature, or
+  // NodeSource apt install on the Cloud VM via .cursor/environment.json). Launch configs
+  // use `node --import tsx` so breakpoints bind to .ts sources. Run `npm ci` in agent-ts
+  // after pulling if node_modules was installed on another OS (esbuild is platform-specific).
   "version": "0.2.0",
   "configurations": [
     {
@@ -87,6 +92,60 @@
         "CELERY_BROKER_URL": "redis://redis:6379/0",
         "CELERY_RESULT_BACKEND": "redis://redis:6379/1"
       }
+    },
+    {
+      // PRIMARY way to step the TS ReAct loop. Runs `tsx src/cli.ts "<prompt>"` synchronously,
+      // no SSE in the way, so breakpoints in services/agent-ts/src/loop.ts (runAgent,
+      // anthropicComplete) and tools.ts hit directly. Edit `args` to change the prompt. Needs
+      // `npm install` in services/agent-ts once; API up on :8000 for tool calls later.
+      // ANTHROPIC_API_KEY loads from the repo-root .env if your shell/IDE picks it up.
+      "name": "Agent TS: CLI (step the loop)",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/services/agent-ts/src/cli.ts",
+      "args": ["what creators are on the watchlist?"],
+      "cwd": "${workspaceFolder}/services/agent-ts",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "env": {
+        "SYSDESIGN_API_URL": "http://localhost:8000"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      // The TS SSE transport (src/server.ts) on :8100. Breakpoints in POST /chat and the
+      // `for await (runAgent(...))` loop fire here. Attach with:
+      // curl -N localhost:8100/chat -H 'content-type: application/json' -d '{"message":"..."}'
+      // Same port as the Python agent — run one or the other, not both.
+      "name": "Agent TS: SSE server (:8100)",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/services/agent-ts/src/index.ts",
+      "cwd": "${workspaceFolder}/services/agent-ts",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "env": {
+        "SYSDESIGN_API_URL": "http://localhost:8000",
+        "PORT": "8100"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      // Step the loop unit tests (node:test via tsx). Breakpoints in test/loop.test.ts and
+      // loop.ts; the three skipped ReAct tests stay skipped until you un-skip them.
+      "name": "Agent TS: tests",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--import", "tsx", "--test"],
+      "program": "${workspaceFolder}/services/agent-ts/test/loop.test.ts",
+      "cwd": "${workspaceFolder}/services/agent-ts",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
     }
   ],
   "compounds": [
@@ -96,6 +155,13 @@
       // Then curl the agent's /chat and step from server.py into loop.py into tools.py.
       "name": "API + Agent SSE",
       "configurations": ["API (FastAPI :8000)", "Agent: SSE server (:8100)"],
+      "stopAll": true
+    },
+    {
+      // TypeScript agent variant. API is Python (debugpy), agent is Node (tsx). Curl :8100/chat
+      // and step server.ts -> loop.ts -> tools.ts. Only one agent server at a time on :8100.
+      "name": "API + Agent TS SSE",
+      "configurations": ["API (FastAPI :8000)", "Agent TS: SSE server (:8100)"],
       "stopAll": true
     },
     {

@@ -4,14 +4,12 @@
 
 // A content block as the loop understands it. Either model text or a tool request.
 export type Block =
-  | { type: "text"; text: string }
-  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> };
+  { type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> };
 
 // What `complete` yields: token deltas as they stream, then exactly one final message. Mirrors the
 // Python agent's {"type":"text_delta"} events followed by one {"type":"final"}.
 export type CompleteEvent =
-  | { type: "text_delta"; text: string }
-  | { type: "final"; content: Block[]; stop_reason: string | null };
+  { type: "text_delta"; text: string } | { type: "final"; content: Block[]; stop_reason: string | null };
 
 // The model-call seam. Same role as Python's Complete alias: messages + schemas + system + model,
 // returns an async iterator of CompleteEvents. anthropicComplete is the real one; tests inject a

@@ -2,9 +2,9 @@
 # runtime, so a rebuild is reproducible and nothing depends on postCreate PATH quirks:
 #   psql      -> postgresql-client   (schema, partitions, drills, matview refresh)
 #   moon      -> the task runner, a standalone Rust binary fetched directly from its
-#                GitHub release (see below). No node/pnpm: moon is not a node package,
-#                the @moonrepo/cli npm shim was only ever a downloader. This also kills
-#                the node_modules named volume that used to break with EACCES.
+#                GitHub release (see below). No node/pnpm for moon itself: moon is not a
+#                node package. Node 22 for services/agent-ts comes from the devcontainer
+#                feature in devcontainer.json (on PATH globally, not nvm).
 #   uv        -> the seed step (uv run python -m common.seed) and dependency sync
 #   redis-cli -> redis-tools (client only): inspect the Module 2 broker/result-backend
 #                keys, LLEN/LRANGE the queue, MONITOR, SUBSCRIBE run:<id>. The server

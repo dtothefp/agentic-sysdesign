@@ -1,0 +1,52 @@
+# CI gate for the TypeScript chat agent (services/agent-ts), separate from the Python `ci`
+# workflow. Path-filtered so it only runs when the TS service changes, on PRs and on merges to
+# main. One job, so "did agent-ts CI pass" is one green check: Prettier format check, tsc
+# typecheck, tsc build, and the node:test loop suite. Node (npm ci), not bun.
+
+name: agent-ts
+
+on:
+  pull_request:
+    paths:
+      - "services/agent-ts/**"
+      - ".github/workflows/agent-ts-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "services/agent-ts/**"
+      - ".github/workflows/agent-ts-ci.yml"
+
+concurrency:
+  group: agent-ts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format-typecheck-build-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/agent-ts
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: services/agent-ts/package-lock.json
+
+      - name: Install (npm ci, frozen lockfile)
+        run: npm ci
+
+      - name: Format check (Prettier)
+        run: npm run format
+
+      - name: Typecheck (tsc)
+        run: npm run typecheck
+
+      - name: Build (tsc into dist/)
+        run: npm run build
+
+      - name: Test (node:test via tsx, no network)
+        run: npm test

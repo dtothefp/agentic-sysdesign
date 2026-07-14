@@ -29,7 +29,7 @@ language's I/O is async from the start. That's the whole reason to have both in 
 
 ```
 src/types.ts    the shared shapes (Block, CompleteEvent, Complete, Message, ToolSchema, AgentEvent)
-src/tools.ts    the 8 HTTP tools (fetch clients of services/api) plus the Toolbox
+src/tools.ts    the HTTP tools (fetch clients of services/api), TOOL_SCHEMAS + runTool dispatch
 src/loop.ts     runAgent (async generator), anthropicComplete (the streamed model call), SYSTEM
 src/trace.ts    optional LangSmith seam, identity no-op until you wire the langsmith JS SDK
 src/server.ts   Hono app: GET /health (open), POST /chat (SSE, X-API-Key gated)
@@ -39,6 +39,11 @@ test/loop.test.ts   the loop spec, one-to-one with the Python tests/test_loop.py
 ```
 
 ## Run it
+
+Node 22 is baked into the dev container (devcontainer feature) and the Cursor Cloud VM
+(NodeSource apt). After a fresh clone, `npm ci` runs automatically in postCreate / environment
+install. If you develop on macOS and open Linux later, rerun `npm ci` here (esbuild is
+platform-specific).
 
 ```bash
 npm install
@@ -86,6 +91,8 @@ Config-as-code is committed (`railway.json`), build with `npm ci && npm run buil
 
 ## Note on CI
 
-The repo's CI is Python-only (uv plus ruff plus pytest), it doesn't build or test this service. Run
-`npm run typecheck` and `npm test` locally before pushing. If this graduates from an experiment,
-add a small node job to `.github/workflows/ci.yml`.
+This service has its own workflow, `.github/workflows/agent-ts-ci.yml`, path-filtered to
+`services/agent-ts/**` so it only runs when the TypeScript changes. It does `npm ci`, then
+`npm run format` (Prettier check), `npm run typecheck`, `npm run build`, and `npm test`. The main
+repo CI stays Python-only (uv plus ruff plus pytest). Run the same four npm scripts locally before
+pushing.

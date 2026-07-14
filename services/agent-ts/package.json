@@ -13,7 +13,9 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "chat": "tsx src/cli.ts",
-    "test": "tsx --test test/*.test.ts"
+    "test": "tsx --test test/*.test.ts",
+    "format": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format:fix": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",
@@ -22,6 +24,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.18.0",
+    "prettier": "^3.4.2",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   }

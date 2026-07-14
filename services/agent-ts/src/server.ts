@@ -12,7 +12,8 @@
 import { serve } from "@hono/node-server";
 import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
-import { streamSSE } from "hono/streaming";
+import type { Context, Next } from "hono";
+import { streamSSE, type SSEStreamingApi } from "hono/streaming";
 import { runAgent } from "./loop.js";
 import type { Message } from "./types.js";
 
@@ -22,7 +23,7 @@ const app = new Hono();
 // header. /health stays open so Railway's headerless healthcheck passes; an unset key means fully
 // open (local dev). Constant-time compare so the check can't leak the key byte by byte. Only the
 // /chat route carries the gate, so /health is never blocked.
-app.use("/chat", async (c, next) => {
+app.use("/chat", async (c: Context, next: Next) => {
   const expected = process.env.SYSDESIGN_API_KEY;
   if (!expected) return next();
   const got = Buffer.from(c.req.header("X-API-Key") ?? "");
@@ -33,10 +34,10 @@ app.use("/chat", async (c, next) => {
   return next();
 });
 
-app.get("/health", (c) => c.json({ status: "ok" }));
+app.get("/health", (c: Context) => c.json({ status: "ok" }));
 
-app.post("/chat", (c) => {
-  return streamSSE(c, async (stream) => {
+app.post("/chat", (c: Context) => {
+  return streamSSE(c, async (stream: SSEStreamingApi) => {
     const body = await c.req.json<{ message: string; history?: Message[] }>();
     for await (const ev of runAgent(body.message, { history: body.history })) {
       await stream.writeSSE({ event: ev.type, data: JSON.stringify(ev) });
