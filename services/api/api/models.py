@@ -213,3 +213,22 @@ class Digest(BaseModel):
     error: str | None
     created_at: datetime
     completed_at: datetime | None
+
+
+# --- Fun: Vibes endpoint -------------------------------------------------------
+
+
+class InfluencerVibe(BaseModel):
+    handle: str
+    name: str
+    signal_count: int
+    vibe: str
+
+
+class Vibes(BaseModel):
+    total_signals: int
+    total_influencers: int
+    most_active_influencer: InfluencerVibe | None
+    vibe_check: str
+    fun_fact: str
+    energy_level: str
