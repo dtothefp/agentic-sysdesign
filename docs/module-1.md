@@ -31,7 +31,7 @@ with an `up` and a `down` block (dbmate), no ORM, no codegen, so the mechanism s
   2026, so real posts from earlier in the year have somewhere to land. See the pinned-post
   gotcha below for why this was needed.
 
-On top of the schema, `backend/api/` is a thin FastAPI surface. `/influencers` (POST one, or
+On top of the schema, `services/api/` is a thin FastAPI surface. `/influencers` (POST one, or
 POST `/influencers/bulk` for the whole watchlist, both upsert on `instagram_handle`; PATCH
 advances the watermark), `/sources`, `/signals` (POST is the idempotent `ON CONFLICT` upsert
 with a server-derived `content_hash`; GET requires a `from`/`to` window so every read prunes),
@@ -143,13 +143,12 @@ machine dies mid-write," which is what idempotency and write-ahead logs answer.
 
 ## How to test
 
-Run everything from `backend/` inside the dev container, where Postgres is a sibling at
+Run everything from the repo root inside the dev container, where Postgres is a sibling at
 `db:5432`. Phases 1 to 4 are the core walkthrough. 5 and 6 are optional depth.
 
 ### Phase 1, clean database and migrations
 
 ```bash
-cd backend
 make db-empty      # drop the db, re-apply all 4 migrations from empty, seed nothing
 make status        # all 4 migrations show as applied, none pending
 ```
@@ -181,10 +180,10 @@ curl -s -X POST localhost:8000/influencers/bulk \
   -d @.claude/skills/scrape-signals/watchlist.json
 
 # scrape each creator's newest post, incremental off each watermark
-uv run --project backend python .claude/skills/scrape-signals/scrape_ig.py
+uv run python .claude/skills/scrape-signals/scrape_ig.py
 
 # then fill older partitions: pull the last N posts per creator, ignoring the watermark
-uv run --project backend python .claude/skills/scrape-signals/scrape_ig.py --backfill --limit 12
+uv run python .claude/skills/scrape-signals/scrape_ig.py --backfill --limit 12
 ```
 
 The first scrape inserts each creator's newest post and advances the watermark. `--backfill`
@@ -192,7 +191,7 @@ looks backward instead of forward, pulls the last N posts regardless of the wate
 deliberately does not advance it, so it fills history without disturbing the forward cursor.
 Watch the per-creator output. `inserted` counts new rows, `already-had` counts idempotent
 no-ops on a re-run, and `skipped` counts posts whose month has no partition. Needs
-`APIFY_API_KEY` in `backend/.env` (gitignored).
+`APIFY_API_KEY` in the repo-root `.env` (gitignored).
 
 ### Phase 4, the EXPLAIN drills (the SQL nitty-gritty)
 
@@ -203,7 +202,7 @@ full seed first, then open an interactive psql and paste one block at a time. Do
 ```bash
 make db-init                         # schema + 4000 synthetic signals for volume
 psql "postgresql://lab:lab@db:5432/sysdesign"
-# then paste blocks from backend/drills/explain-drills.sql one at a time
+# then paste blocks from packages/core/drills/explain-drills.sql one at a time
 ```
 
 The six drills, and what to look for in each plan:
@@ -257,5 +256,5 @@ the concurrent-refresh path (and its enabling unique index) matters now rather t
 
 Module 2 adds the Celery fan-out. The `runs` table already in the schema becomes the durable
 job-of-record, Redis carries high-frequency progress, and a Next.js frontend polls it. The
-`make openapi` spec (`backend/openapi.json`) is the codegen input for that frontend's typed
+`make openapi` spec (`services/api/openapi.json`) is the codegen input for that frontend's typed
 API client, which is why the OpenAPI surface is nailed down in Module 1.

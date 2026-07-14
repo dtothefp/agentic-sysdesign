@@ -1,0 +1,16 @@
+# moon project: Module 5 Managed Agents infra (declarative YAML + agentctl.py, a thin
+# `ant` CLI wrapper). The deploy/run tasks need secrets (ANTHROPIC_API_KEY, SYSDESIGN_API_KEY)
+# so they stay in the Makefile/CI as the hand-cranks; moon only owns lint here.
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+stack: 'backend'
+layer: 'tool'
+language: 'python'
+
+tasks:
+  lint:
+    script: 'uv run ruff check . && uv run ruff format --check .'
+    toolchain: 'system'
+    inputs:
+      - '*.py'
+      - '/pyproject.toml'

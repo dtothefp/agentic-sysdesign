@@ -1,0 +1,16 @@
+# moon workspace: which directories are projects. Three tiers, same meaning as the
+# uv workspace members in the root pyproject.toml:
+#   apps/      user-facing frontends (chat-web)
+#   services/  deployable backends, one Railway service each (api, worker)
+#   packages/  shared libraries + infra that never deploy on their own (core, task-contract, agents)
+# This dir doubles as the workspace-root marker common/env.py anchors its .env search on.
+$schema: 'https://moonrepo.dev/schemas/workspace.json'
+
+projects:
+  - 'apps/*'
+  - 'services/*'
+  - 'packages/*'
+
+vcs:
+  client: 'git'
+  defaultBranch: 'main'

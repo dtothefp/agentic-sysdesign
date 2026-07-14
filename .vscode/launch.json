@@ -18,7 +18,7 @@
       "request": "launch",
       "module": "uvicorn",
       "args": ["api.main:app", "--host", "0.0.0.0", "--port", "8000"],
-      "cwd": "${workspaceFolder}/backend",
+      "cwd": "${workspaceFolder}",
       "python": "/home/vscode/.venv/bin/python",
       "console": "integratedTerminal",
       "justMyCode": false,
@@ -35,7 +35,7 @@
       "request": "launch",
       "module": "celery",
       "args": ["-A", "worker.celery_app", "worker", "--loglevel", "INFO", "--pool", "solo"],
-      "cwd": "${workspaceFolder}/backend",
+      "cwd": "${workspaceFolder}",
       "python": "/home/vscode/.venv/bin/python",
       "console": "integratedTerminal",
       "justMyCode": false,
@@ -50,8 +50,8 @@
   "compounds": [
     {
       // Launch both, then POST /runs and step through the whole fan-out. Breakpoints to
-      // try: api/main.py create_run, worker/tasks.py scrape_influencer + finalize_run,
-      // api/main.py stream_run's gen() while a curl -N is attached.
+      // try: services/api create_run, worker/tasks.py scrape_influencer + finalize_run (services/worker),
+      // services/api stream_run's gen() while a curl -N is attached.
       "name": "Debug API + Worker",
       "configurations": ["Debug API (FastAPI)", "Debug Celery Worker"],
       "stopAll": true

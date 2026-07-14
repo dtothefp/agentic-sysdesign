@@ -17,12 +17,13 @@ It talks to the running API over HTTP the same way any client would: GET /influe
 who to scrape, POST /signals for each post, PATCH /influencers/{id} to advance the watermark.
 
 Apify: the REST run-sync-get-dataset-items endpoint runs the actor and returns its dataset
-in one blocking call, no MCP, no SDK. APIFY_API_KEY is read from the environment or backend/.env.
+in one blocking call, no MCP, no SDK. APIFY_API_KEY is read from the environment or the repo-root .env.
 
-Usage (from the repo root, with the API running via `cd backend && make api`):
-  uv run --project backend python .claude/skills/scrape-signals/scrape_ig.py
-  uv run --project backend python .claude/skills/scrape-signals/scrape_ig.py --handle nick_saraev --limit 30
+Usage (from the repo root, with the API running via `make api`):
+  uv run python .claude/skills/scrape-signals/scrape_ig.py
+  uv run python .claude/skills/scrape-signals/scrape_ig.py --handle nick_saraev --limit 30
 """
+
 import argparse
 import json
 import os
@@ -31,25 +32,25 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 APIFY_ACTOR = "apify~instagram-scraper"  # ~ is the REST form of the apify/instagram-scraper slug
 
 
 def load_apify_key() -> str:
-    """Env first, then backend/.env (walking up from this file), so a bare env var and the
-    checked-in .env both work. Never hard-code the key."""
+    """Env first, then the repo-root .env (walking up from this file, anchored on the .moon
+    dir so we never read a parent workspace's .env). Never hard-code the key."""
     key = os.environ.get("APIFY_API_KEY")
     if key:
         return key
     for base in [Path.cwd(), *Path(__file__).resolve().parents]:
-        env = base / "backend" / ".env"
-        if env.exists():
+        env = base / ".env"
+        if (base / ".moon").is_dir() and env.exists():
             for line in env.read_text().splitlines():
                 if line.startswith("APIFY_API_KEY="):
                     return line.split("=", 1)[1].strip()
-    sys.exit("APIFY_API_KEY not set. Export it or put it in backend/.env")
+    sys.exit("APIFY_API_KEY not set. Export it or put it in the repo-root .env")
 
 
 def http_json(url: str, method: str = "GET", body: dict | None = None, timeout: int = 300):
@@ -66,8 +67,7 @@ def apify_run(key: str, actor_input: dict) -> list[dict]:
     return http_json(url, method="POST", body=actor_input)
 
 
-def scrape_one(api: str, key: str, inf: dict, run_ts: str, limit: int,
-               backfill: bool = False) -> str:
+def scrape_one(api: str, key: str, inf: dict, run_ts: str, limit: int, backfill: bool = False) -> str:
     """Scrape one influencer end to end: fetch, post each signal, advance the watermark.
 
     Two modes. Normal (incremental) looks forward off the watermark. Backfill looks backward:
@@ -106,7 +106,7 @@ def scrape_one(api: str, key: str, inf: dict, run_ts: str, limit: int,
             "handle": handle,
             "shortcode": p.get("shortCode"),
             "url": p.get("url"),
-            "type": p.get("type"),          # 'Image' | 'Video' (reel) | 'Sidecar'
+            "type": p.get("type"),  # 'Image' | 'Video' (reel) | 'Sidecar'
             "caption": p.get("caption"),
             "posted_at": ts,
         }
@@ -129,8 +129,7 @@ def scrape_one(api: str, key: str, inf: dict, run_ts: str, limit: int,
     # skips this: it's filling the past, not moving the forward cursor.
     if not backfill:
         try:
-            http_json(f"{api}/influencers/{inf['id']}", method="PATCH",
-                      body={"last_scraped_at": run_ts}, timeout=30)
+            http_json(f"{api}/influencers/{inf['id']}", method="PATCH", body={"last_scraped_at": run_ts}, timeout=30)
         except urllib.error.HTTPError as e:
             return f"  {handle:16} WATERMARK ERROR {e.code}"
 
@@ -148,9 +147,12 @@ def main() -> None:
     ap.add_argument("--api", default="http://localhost:8000")
     ap.add_argument("--handle", help="scrape only this handle (default: every influencer)")
     ap.add_argument("--limit", type=int, default=50, help="max posts per incremental run")
-    ap.add_argument("--backfill", action="store_true",
-                    help="pull the last --limit posts per influencer regardless of the watermark, "
-                         "to fill older partitions. Does not advance the watermark.")
+    ap.add_argument(
+        "--backfill",
+        action="store_true",
+        help="pull the last --limit posts per influencer regardless of the watermark, "
+        "to fill older partitions. Does not advance the watermark.",
+    )
     ap.add_argument("--workers", type=int, default=6)
     args = ap.parse_args()
 
@@ -162,13 +164,12 @@ def main() -> None:
             sys.exit(f"no influencer with handle {args.handle}. Seed it or POST /influencers first.")
 
     # one run timestamp for the whole batch; each influencer's watermark advances to it.
-    run_ts = datetime.now(timezone.utc).isoformat()
+    run_ts = datetime.now(UTC).isoformat()
     mode = f"backfill last {args.limit}" if args.backfill else "incremental"
     print(f"scraping {len(influencers)} influencer(s) in parallel ({mode})...")
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = [pool.submit(scrape_one, args.api, key, inf, run_ts, args.limit, args.backfill)
-                   for inf in influencers]
+        futures = [pool.submit(scrape_one, args.api, key, inf, run_ts, args.limit, args.backfill) for inf in influencers]
         for f in as_completed(futures):
             print(f.result())
 

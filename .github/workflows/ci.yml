@@ -1,5 +1,7 @@
-# One CI gate for the backend: lint, format check, and tests. Runs on every PR and on
-# merges to main. Kept to a single job so "did CI pass" is one green check.
+# One CI gate for the Python workspace (services/api, services/worker, packages/*): lint,
+# format check, and tests. Runs on every PR and on merges to main. Kept to a single job so
+# "did CI pass" is one green check. Everything runs from the repo root: the uv workspace
+# has one lock there, and the root pyproject's testpaths cover every member's tests.
 #
 # A pgvector Postgres service is stood up so the `integration`-marked tests exercise the
 # real app + DB (they auto-skip locally when no DB is reachable). dbmate applies the schema;
@@ -38,10 +40,6 @@ jobs:
     env:
       DATABASE_URL: postgresql://lab:lab@localhost:5432/sysdesign
 
-    defaults:
-      run:
-        working-directory: backend
-
     steps:
       - uses: actions/checkout@v4
 
@@ -50,8 +48,8 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Sync dependencies (installs Python 3.13 + dev group)
-        run: uv sync
+      - name: Sync dependencies (installs Python 3.13 + every workspace member + dev group)
+        run: uv sync --all-packages
 
       - name: Lint (ruff check)
         run: uv run ruff check .

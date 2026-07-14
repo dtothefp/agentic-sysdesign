@@ -1,0 +1,27 @@
+# moon project: the shared domain layer (import name `common`) plus db/ (migrations +
+# the prod migrate.py applier). Library tier: never deploys on its own, everything else
+# depends on it.
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+stack: 'backend'
+layer: 'library'
+language: 'python'
+
+tasks:
+  lint:
+    script: 'uv run ruff check . && uv run ruff format --check .'
+    toolchain: 'system'
+    inputs:
+      - 'common/**/*.py'
+      - 'db/**/*.py'
+      - 'tests/**/*.py'
+      - '/pyproject.toml'
+
+  test:
+    command: 'uv run pytest tests'
+    toolchain: 'system'
+    inputs:
+      - 'common/**/*.py'
+      - 'tests/**/*.py'
+      - 'pyproject.toml'
+      - '/uv.lock'

@@ -1,0 +1,48 @@
+# Workspace root. Virtual on purpose (no [project] table): the root is not itself a
+# package, it just declares the uv workspace, the shared dev tooling, and the shared
+# lint/test config. Run `uv sync --all-packages` here to build one .venv holding every
+# member; run a single service with `uv run --package sysdesign-api ...`.
+
+[tool.uv.workspace]
+members = [
+  "services/api",
+  "services/worker",
+  "packages/core",
+  "packages/task-contract",
+  "packages/agents",
+]
+
+[dependency-groups]
+# Dev-only tooling, shared by every member. `uv sync` installs these by default; prod
+# images skip them with `uv sync --no-dev`. Kept out of member dependencies so each
+# runtime deps list stays honest about what that service itself needs.
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.6",
+  "httpx>=0.27", # required by starlette/fastapi TestClient in the API tests
+]
+
+[tool.ruff]
+# Generous width: the codebase intentionally runs long inline comments (own-the-interface
+# explanations) up to ~126 cols, so a tighter limit would be noise, not signal.
+line-length = 130
+target-version = "py313"
+
+[tool.ruff.lint]
+# E/W pycodestyle, F pyflakes (unused imports/names, real bugs), I import sorting,
+# UP pyupgrade, B bugbear. A pragmatic core, not the whole rulebook.
+select = ["E", "W", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency markers are meant to be called in argument defaults (that's the whole
+# DI mechanism), so B008 is a false positive for them. Whitelist the ones this API uses.
+extend-immutable-calls = ["fastapi.Query", "fastapi.Depends", "fastapi.Path", "fastapi.Header"]
+
+[tool.pytest.ini_options]
+# One pytest invocation from the root covers every member's tests. The workspace members
+# are installed into the shared .venv (real packages now, not a pythonpath hack), so tests
+# import `api`, `common`, `worker`, `task_contract` the same way the services do.
+testpaths = ["services/api/tests", "packages/core/tests"]
+markers = [
+  "integration: needs a live Postgres/Redis (skipped when the DB is unreachable)",
+]

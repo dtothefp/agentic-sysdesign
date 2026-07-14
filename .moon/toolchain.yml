@@ -1,0 +1,5 @@
+# Toolchains moon manages. Deliberately empty for now: every task runs `toolchain: system`
+# and shells out to uv, which already owns the Python version (requires-python) and the one
+# workspace .venv. Letting moon ALSO manage a Python would give the interpreter two owners.
+# When apps/chat-web grows real code, add the node/pnpm toolchain here so moon pins it.
+$schema: 'https://moonrepo.dev/schemas/toolchain.json'

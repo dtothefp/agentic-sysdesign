@@ -1,0 +1,5 @@
+{
+  "name": "@sysdesign/chat-web",
+  "private": true,
+  "description": "Module 7 chat agent frontend. Scaffold only; see moon.yml."
+}

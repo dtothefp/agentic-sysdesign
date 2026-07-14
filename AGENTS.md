@@ -23,8 +23,8 @@ in one repo that accumulates. Each finished module gets a git tag (`module-1`,
   as a staleness backstop. This is why Module 1 built the matview with a unique index on
   `(influencer_id, day)`, that index is what lets `CONCURRENTLY` refresh without locking
   dashboard readers. Runs have a `demo` mode (synthetic signals, no Apify spend) for watching
-  the fan-out and SSE stream cheaply, and a `live` mode (real Apify scrape). Backend lives in
-  `backend/worker/` (`celery_app.py`, `tasks.py`, `scrape.py`); run it with `make worker`.
+  the fan-out and SSE stream cheaply, and a `live` mode (real Apify scrape). The worker lives in
+  `services/worker/` (`celery_app.py`, `tasks.py`, `scrape.py`); run it with `make worker`.
   Full first-principles walkthrough (Redis's two hats, chord = distributed Promise.all,
   snapshot-then-deltas SSE, debugging with `--pool solo`) in [docs/module-2.md](docs/module-2.md).
 - **Module 3, deploy (SHIPPED).** Railway for the API + worker + Redis (next to the
@@ -49,7 +49,7 @@ in one repo that accumulates. Each finished module gets a git tag (`module-1`,
   the model is non-deterministic. A beat sweep for unrated signals is the backstop, same
   pattern as the matview refresh; it only sweeps `source = 'instagram'` rows, so the 4000
   seeded drill signals never turn into a surprise model bill. The model call goes through one
-  provider-agnostic adapter, `backend/common/rating.py`, speaking the OpenAI-compatible chat
+  provider-agnostic adapter, `packages/core/common/rating.py`, speaking the OpenAI-compatible chat
   completions shape over raw urllib (a wire format every serving stack clones, the way S3's
   API got cloned by R2 and MinIO), so local dev rates through Ollama in the devcontainer
   (free, offline; `make ollama-pull` once, then `RATING_MODEL=ollama/llama3.2:1b` is already
@@ -111,54 +111,61 @@ the answer can change per workload as the hosted offerings evolve.
 
 ## Layout
 
-Standard `backend/` + `frontend/` split, matching ExtractIQ and SignalDashboard and the
-app-setup skill.
+A moon + uv-workspace monorepo. One `uv.lock` at the root covers every workspace member;
+moon runs per-project tasks (`moon run api:dev`), the root Makefile keeps the db lifecycle
+and the secret-bearing agent targets.
 
 ```
-backend/    all Python + database: common/, db/migrations/, drills/, api/, Makefile, pyproject.toml
-frontend/   Next.js UI, empty until Module 2
+.moon/            moon workspace config (doubles as the .env loader's repo-root marker)
+apps/chat-web/    React chat agent UI (scaffold, Module 7)
+services/api/     FastAPI surface (sysdesign-api): api/, tests/, railway.json, openapi.json
+services/worker/  Celery worker + beat (sysdesign-worker): worker/, railway.json
+packages/core/    shared code (sysdesign-core): common/, db/migrations/, drills/, tests/
+packages/task-contract/  task-name constants + send-only Celery client (api->worker contract)
+packages/agents/  Module 5 Managed Agents YAML + agentctl.py
+infra/            Railway env-var sync + preview-env scripts
 .claude/skills/   in-repo skills (e.g. scrape-signals), tracked branch-by-branch with the code they drive
 .devcontainer/    reproducible container (its own sibling Postgres at db:5432)
 ```
 
-Run all backend commands from `backend/`.
+Run everything from the repo root. `uv sync --all-packages` installs every member;
+`uv run --package sysdesign-api ...` targets one.
 
 ## Stack
 
 Postgres 16 with pgvector (Docker), Python 3.13 managed by `uv`, `psql` for the drills,
 `dbmate` for migrations, FastAPI for the API surface. The frontend (Next.js) arrives in
-Module 2 and talks to the FastAPI backend over HTTP.
+Module 2 and talks to the FastAPI service over HTTP.
 
 ## Build / Dev
 
-All from `backend/`:
+All from the repo root:
 
 ```bash
-cd backend
 make setup       # HOST: docker compose up db, then migrate + full seed
 make db-init     # DEV CONTAINER: migrate + full seed (influencers + 4000 drill signals)
 make db-fresh    # DEV CONTAINER: drop db, re-migrate from empty, seed ONLY influencers (no signals)
 make db-empty    # DEV CONTAINER: drop db, re-migrate from empty, seed NOTHING (skill adds influencers via API)
-make migrate     # apply pending dbmate migrations (db/migrations/*.sql)
+make migrate     # apply pending dbmate migrations (packages/core/db/migrations/*.sql)
 make status      # which migrations have run vs pending
 make rollback    # undo the most recent migration (its migrate:down)
 make new name=X  # scaffold the next timestamped migration
 make seed        # full seed: watchlist + 4000 synthetic signals (drill volume)
 make seed-influencers  # just the watchlist, no signals
-make drills      # run drills/explain-drills.sql (whole file, smoke test)
+make drills      # run packages/core/drills/explain-drills.sql (whole file, smoke test)
 make api         # run the FastAPI surface (uvicorn, reload) at :8000, docs at /docs
 make worker      # DEV CONTAINER: Celery worker for Module 2 fan-out jobs (needs Redis + the API)
 make worker-beat # DEV CONTAINER: Celery beat, periodic backstops (rollup refresh + unrated sweep)
 make ollama-pull # DEV CONTAINER: one-time pull of the Module 4 local rating model (llama3.2:1b)
-make openapi     # export the OpenAPI spec to backend/openapi.json (no db/server needed)
-make lint        # ruff check over the backend (config in pyproject.toml)
-make test        # pytest (backend/tests); integration tests auto-skip when Postgres is down
+make openapi     # export the OpenAPI spec to services/api/openapi.json (no db/server needed)
+make lint        # ruff check over the whole workspace (config in the root pyproject.toml)
+make test        # pytest (services/api/tests + packages/core/tests); integration tests auto-skip when Postgres is down
 make down        # drop the volume
 make reset       # down then setup
 uv run python -m common.seed   # re-seed (idempotent, inserts nothing the second time)
 ```
 
-The FastAPI app lives in `backend/api/` (`api.main:app`). Endpoints: `/influencers` (POST a
+The FastAPI app lives in `services/api/api/` (`api.main:app`). Endpoints: `/influencers` (POST a
 single creator, POST `/influencers/bulk` for the whole watchlist, both upsert on
 instagram_handle; PATCH advances the last_scraped_at watermark), `/sources`, `/signals` (POST
 is the idempotent `ON CONFLICT` upsert, content_hash derived server-side; GET requires a
@@ -167,11 +174,11 @@ data, use the in-repo `scrape-signals` skill (`.claude/skills/scrape-signals/`),
 Claude Code drives the database. It's a loop over the API: POST the watchlist, GET it back,
 scrape each creator's recent IG posts (Apify REST, in parallel, incremental off each
 watermark), then POST each post to `/signals`. There's no `make scrape`; it's a skill Claude
-Code runs, not a build target. Needs `APIFY_API_KEY` in `backend/.env` (gitignored, never commit it).
+Code runs, not a build target. Needs `APIFY_API_KEY` in the repo-root `.env` (gitignored, never commit it).
 
 FastAPI generates the OpenAPI spec automatically (`/openapi.json`, Swagger at `/docs`,
 ReDoc at `/redoc`); no separate OpenAPI library. `operationId`s are the handler names
-(`list_signals`, `create_signal`) so generated clients read cleanly. `make openapi` dumps the spec to `backend/openapi.json`
+(`list_signals`, `create_signal`) so generated clients read cleanly. `make openapi` dumps the spec to `services/api/openapi.json`
 (introspection only, no db/server), which the Module 2 Next.js frontend codegens a typed
 client from. Keep raw SQL via psycopg, no ORM. The explicit SQL is the studyable artifact
 (partition pruning, ON CONFLICT, index usage stay visible), and it matches the dbmate
@@ -187,7 +194,7 @@ for the local no-TLS container.
 
 The dev container (`.devcontainer/compose.yml`) is standalone and runs its own Postgres
 with no host port publish, so it never collides with a host-run `make up` on 5432. Its db
-is a separate volume, so seed it once with `make db-init` (from `backend/`) in a container
+is a separate volume, so seed it once with `make db-init` (from the repo root) in a container
 terminal. Do not add `include: ../docker-compose.yml` back. Compose appends port mappings,
 which reintroduces the 5432 collision.
 
@@ -195,7 +202,7 @@ which reintroduces the 5432 collision.
 
 App tier. ALWAYS a feature branch plus PR. Never commit to `main` directly. Tag each
 completed module on `main` (`git tag module-1 && git push origin module-1`). Schema
-changes go through a new dbmate migration in `backend/db/migrations/` (`make new
+changes go through a new dbmate migration in `packages/core/db/migrations/` (`make new
 name=...`), never by editing an already-applied migration file. Add the `migrate:down`
 block too, so rollback works.
 
@@ -228,7 +235,7 @@ sudo pg_ctlcluster 16 main start
 sudo redis-server /etc/redis/redis.conf --daemonize yes
 ```
 
-Then run services from `backend/`, each in its own terminal, per the `make` targets already
+Then run services from the repo root, each in its own terminal, per the `make` targets already
 documented above (`make api` on :8000, `make worker`, optional `make worker-beat`). The DB is
 already migrated and seeded (5 influencers + 4000 drill signals); use `make migrate`/`make seed`
 or `make db-fresh` only if you dropped or emptied it. The fastest end-to-end smoke test is a demo
@@ -237,12 +244,12 @@ run (no external keys, no Apify spend), which exercises the Celery chord fan-out
 `curl -N localhost:8000/runs/<run_id>/stream`.
 
 Lint with `make lint` (ruff `check` plus `ruff format --check`, config in `pyproject.toml`);
-`make format` auto-applies the formatter. Tests are `make test` (pytest under `backend/tests/`):
+`make format` auto-applies the formatter. Tests are `make test` (pytest under `services/api/tests/` and `packages/core/tests/`):
 unit tests are hermetic, and tests marked `integration` need a live Postgres and auto-skip when
 it's unreachable, so `make test` is green even with no DB up (start Postgres first to actually
 exercise them). Lint, format check, and tests all run in CI (`.github/workflows/ci.yml`) on every
-PR and on merge to main, so run `make format` and `make lint` before pushing. "Build" for the backend is `uv sync` plus `make openapi` (spec
+PR and on merge to main, so run `make format` and `make lint` before pushing. "Build" for the Python side is `uv sync --all-packages` plus `make openapi` (spec
 export). The Module 4
 rating layer stays inert unless `RATING_MODEL` and a model are provided; local Ollama is a
 `.devcontainer` sibling that is not installed on the Cloud VM, so demo runs finish with
-`rated_count = 0`, which is expected. The empty `frontend/` has no UI to run yet.
+`rated_count = 0`, which is expected. The `apps/chat-web/` scaffold has no UI to run yet.

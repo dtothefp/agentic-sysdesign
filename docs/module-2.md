@@ -610,7 +610,7 @@ run inside a transaction block, which is why `finalize_run` opens its connection
 
 ## Running it
 
-Three dev-container terminals, all from `backend/`:
+Three dev-container terminals, all from the repo root:
 
 ```bash
 make api       # terminal A: the front door, :8000

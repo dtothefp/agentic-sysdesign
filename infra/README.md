@@ -6,8 +6,8 @@ environment, three services. Postgres is NOT here, it lives on Supabase
 
 | Service | Source | Runs |
 |---|---|---|
-| `api` | GitHub `dtothefp/sysdesign`, root `backend/` | uvicorn via `backend/railway.api.json`, public domain |
-| `worker` | same repo + root | Celery worker with beat embedded, via `backend/railway.worker.json`, private |
+| `api` | GitHub `dtothefp/sysdesign`, root = repo root | uvicorn via `services/api/railway.json`, public domain |
+| `worker` | same repo + root | Celery worker with beat embedded, via `services/worker/railway.json`, private |
 | `redis` | image `redis:7-alpine` + volume | broker, result backend, SSE pub/sub, private |
 
 ## Where each piece of config lives (the IaC-lite contract)
@@ -16,11 +16,11 @@ We deliberately skipped Terraform. Railway has no official provider and the comm
 is niche; the platform's own config-as-code story is a per-service `railway.json` plus
 GitHub-connected auto-deploys. So the codified surface is
 
-- **Build + run config** in `backend/railway.api.json` and `backend/railway.worker.json`
+- **Build + run config** in `services/api/railway.json` and `services/worker/railway.json`
   (start command, healthcheck, restart policy). Reviewed in PRs like any code. Railway
   reads them because each service's settings point at the file (repo-root path, set once).
 - **Env vars** in [railway-env.py](railway-env.py). The manifest in that script says which
-  variables each service gets and where values come from (`backend/.env`, gitignored).
+  variables each service gets and where values come from (the repo-root `.env`, gitignored).
   `python3 infra/railway-env.py list` shows what's live on Railway with secrets redacted;
   `sync --dry` diffs manifest vs remote and flags drift (vars on Railway the manifest
   doesn't know about); `sync` pushes. No more mystery vars.
@@ -63,7 +63,7 @@ the `verificationDnsHost` / `verificationToken` fields on the custom domain's `s
 
 ### Gotcha: uvicorn behind Railway's proxy needs `--forwarded-allow-ips='*'`
 
-The api start command in `backend/railway.api.json` carries
+The api start command in `services/api/railway.json` carries
 `--proxy-headers --forwarded-allow-ips='*'`. Railway terminates TLS at its edge and forwards
 plain HTTP to the container, so every request arrives with `X-Forwarded-Proto: https` but a
 raw `http` scheme on the socket. Uvicorn only honors that header from IPs listed in
@@ -83,7 +83,7 @@ here because the container is only reachable through Railway's proxy (no direct 
 ## Migrations
 
 The api runs migrations before it takes traffic, via the `preDeployCommand` in
-`railway.api.json`:
+`services/api/railway.json`:
 
 ```
 uv run python db/migrate.py
@@ -102,9 +102,9 @@ have yet, the schema is caught up first, or the deploy fails and the old version
 serving. It reads `DATABASE_URL` (the api's, the Supabase session pooler on 5432, which
 supports the DDL a migration needs).
 
-[db/migrate.py](../backend/db/migrate.py) is a ~50-line applier over dbmate's own file
+[migrate.py](../packages/core/db/migrate.py) is a ~50-line applier over dbmate's own file
 format. dbmate is a Go binary and this image is a uv/Python build, so rather than wrangle
-the binary into the image it reads the same `db/migrations/*.sql` files and writes the same
+the binary into the image it reads the same `packages/core/db/migrations/*.sql` files and writes the same
 `schema_migrations` table dbmate uses, with psycopg (already a dependency). dbmate stays the
 local tool (`make migrate`, `make new`), this is the prod applier, and the two are
 interchangeable, `dbmate status` reads the table the runner wrote and reports every
@@ -119,7 +119,7 @@ a single statement (Postgres won't run `CONCURRENTLY` inside an implicit transac
 
 Push to `main` deploys api + worker (Railway GitHub integration, PR environments off).
 The api's deploy runs the migration step above first. Redis redeploys only when its
-image/config changes. The project-scoped token in `backend/.env`
+image/config changes. The project-scoped token in the repo-root `.env`
 (`RAILWAY_PROJECT_TOKEN`) drives `railway` CLI status/logs/redeploys and the GraphQL calls
 in `railway-env.py`. It cannot touch other projects.
 
@@ -153,7 +153,7 @@ environment only a broader token can remove). Environment management runs on a w
 token instead, stored as
 
 - the `RAILWAY_WORKSPACE_TOKEN` repo secret (what the Action uses), and
-- `RAILWAY_WORKSPACE_TOKEN` in `backend/.env` for local runs of the script.
+- `RAILWAY_WORKSPACE_TOKEN` in the repo-root `.env` for local runs of the script.
 
 Rotating it means updating both. `railway-env.py` (env-var sync) stays on the
 narrower project token; only preview create/teardown needs the wide one. Fork PRs never
@@ -196,7 +196,7 @@ local API at a stable hostname the vault credential already allows.
   `sysdesign-local`, id `dd6113aa-...`, config in `~/.cloudflared/config.yml` on David's
   machine, created 2026-07-11 via `cloudflared tunnel login` + `create` + `route dns`).
 - The vault credential's `allowed_hosts` includes this hostname, so the agent's
-  `X-API-Key` is substituted toward it exactly like prod. Keep `m5_agents/vault/api-key.yaml`
+  `X-API-Key` is substituted toward it exactly like prod. Keep `packages/agents/vault/api-key.yaml`
   and the live credential in sync when hosts change.
 - Run it with `cloudflared tunnel run sysdesign-local`. Nothing listens until the local
   API is up; the tunnel itself only ever holds an OUTBOUND connection to Cloudflare's

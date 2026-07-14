@@ -2,7 +2,7 @@
 """Railway env-var sync for the sysdesign project. IaC-lite.
 
 The MANIFEST below is the source of truth for which variables each service gets
-and where the value comes from. Secret values live in backend/.env (gitignored),
+and where the value comes from. Secret values live in the repo-root .env (gitignored),
 never here. Reference values (${{redis...}}) are Railway-side templates resolved
 at deploy, so no secret ever passes through this file.
 
@@ -10,7 +10,7 @@ at deploy, so no secret ever passes through this file.
     python3 infra/railway-env.py sync --dry    # diff manifest vs remote, change nothing
     python3 infra/railway-env.py sync          # push manifest values
 
-Auth is the project-scoped token (RAILWAY_PROJECT_TOKEN in backend/.env). It can
+Auth is the project-scoped token (RAILWAY_PROJECT_TOKEN in the repo-root .env). It can
 read/write variables and trigger deploys for this one project, nothing else.
 """
 
@@ -22,7 +22,7 @@ import urllib.request
 from pathlib import Path
 
 GQL = "https://backboard.railway.com/graphql/v2"
-ENV_FILE = Path(__file__).resolve().parent.parent / "backend" / ".env"
+ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
 PROJECT_ID = "12dffbd4-65bd-44f7-83b7-d30238c92892"  # sysdesign
 ENVIRONMENT_ID = "530d245e-d3f1-478d-b622-04e9426d7470"  # production
@@ -38,7 +38,7 @@ SERVICES = {
 # place propagates everywhere on the next deploy.
 REDIS_BASE = "redis://:${{redis.REDIS_PASSWORD}}@${{redis.RAILWAY_PRIVATE_DOMAIN}}:6379"
 
-# Manifest entry values are either ("env", KEY) = read KEY from backend/.env,
+# Manifest entry values are either ("env", KEY) = read KEY from the repo-root .env,
 # or ("literal", VALUE) = use VALUE as-is (safe for non-secrets and references).
 MANIFEST = {
     "api": {
@@ -76,7 +76,7 @@ MANIFEST = {
         # Module 4 rating stage, LIVE as of 2026-07-10. Default is Groq's free tier
         # (rate-limited, plenty for this pipeline); Anthropic is the per-run quality
         # override, POST /runs {"model": "anthropic/claude-haiku-4-5"}. Keys come from
-        # backend/.env (GROQ reused from the parent root .env, ANTHROPIC from
+        # the repo-root .env (GROQ reused from the parent root .env, ANTHROPIC from
         # package-defrag). Unset RATING_MODEL here and re-sync to make rating inert again.
         "RATING_MODEL": ("literal", "groq/llama-3.1-8b-instant"),
         "GROQ_API_KEY": ("env", "GROQ_API_KEY"),
@@ -86,12 +86,12 @@ MANIFEST = {
         # out of .env just makes tracing a no-op (same inert-until-keyed contract as rating).
         "LANGSMITH_TRACING": ("literal", "true"),
         "LANGSMITH_ENDPOINT": ("literal", "https://api.smith.langchain.com"),
-        # Deployed traces land in a separate project from local (backend/.env uses
+        # Deployed traces land in a separate project from local (the repo-root .env uses
         # sysdesign-local), so the LangSmith sidebar cleanly splits prod from dev runs.
         "LANGSMITH_PROJECT": ("literal", "sysdesign-prod"),
         # Prod gets its OWN LangSmith key (the local worker uses the local LANGSMITH_API_KEY), so
         # either environment's key can be revoked without touching the other. This key lives ONLY
-        # in Railway, never in backend/.env, since it has no local use. env_optional means: push it
+        # in Railway, never in the repo-root .env, since it has no local use. env_optional means: push it
         # from .env when it happens to be present (the rotation path), else leave Railway's be.
         "LANGSMITH_API_KEY": ("env_optional", "LANGSMITH_API_KEY_PROD"),
     },
@@ -125,7 +125,7 @@ def gql(token: str, query: str, variables: dict | None = None) -> dict:
             if resp.get("errors"):
                 raise RuntimeError(resp["errors"][0]["message"])
             return resp["data"]
-        except urllib.error.HTTPError as e:
+        except urllib.error.HTTPError:
             if attempt == 3:
                 raise
             time.sleep(2 * (attempt + 1))  # transient 5xx, back off and retry
@@ -136,13 +136,19 @@ def remote_vars(token: str, service_id: str) -> dict:
     q = """query($projectId: String!, $environmentId: String!, $serviceId: String!) {
       variables(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId, unrendered: true)
     }"""
-    return gql(token, q, {
-        "projectId": PROJECT_ID, "environmentId": ENVIRONMENT_ID, "serviceId": service_id,
-    })["variables"]
+    return gql(
+        token,
+        q,
+        {
+            "projectId": PROJECT_ID,
+            "environmentId": ENVIRONMENT_ID,
+            "serviceId": service_id,
+        },
+    )["variables"]
 
 
 # Sentinel for a manifest entry we deliberately leave untouched this run (a prod-only secret
-# that lives in Railway and isn't in backend/.env).
+# that lives in Railway and isn't in the repo-root .env).
 _SKIP = object()
 
 
@@ -151,12 +157,12 @@ def resolve(entry: tuple, dotenv: dict):
     if kind == "literal":
         return val
     if kind == "env_optional":
-        # Prod-only secret managed in Railway, not in backend/.env. Push it only when it IS in
+        # Prod-only secret managed in Railway, not in the repo-root .env. Push it only when it IS in
         # .env (the rotation path: drop the new key in, sync, remove); otherwise leave Railway's
         # value alone instead of erroring on the blank.
         return dotenv.get(val, _SKIP)
     if val not in dotenv:
-        sys.exit(f"backend/.env is missing {val}, refusing to sync a blank")
+        sys.exit(f"the repo-root .env is missing {val}, refusing to sync a blank")
     return dotenv[val]
 
 
@@ -193,10 +199,19 @@ def cmd_sync(token: str, dry: bool) -> None:
             verb = "would set" if dry else "set"
             print(f"  {svc}.{name}: {verb} -> {redact(name, value)}")
             if not dry:
-                gql(token, upsert, {"input": {
-                    "projectId": PROJECT_ID, "environmentId": ENVIRONMENT_ID,
-                    "serviceId": svc_id, "name": name, "value": value,
-                }})
+                gql(
+                    token,
+                    upsert,
+                    {
+                        "input": {
+                            "projectId": PROJECT_ID,
+                            "environmentId": ENVIRONMENT_ID,
+                            "serviceId": svc_id,
+                            "name": name,
+                            "value": value,
+                        }
+                    },
+                )
                 time.sleep(0.5)
         # flag drift the manifest doesn't know about (the Vercel mystery-var problem)
         railway_injected = {"RAILWAY_", "REDIS_PASSWORD"}
@@ -209,8 +224,7 @@ def main() -> None:
     args = sys.argv[1:]
     if not args or args[0] not in ("list", "sync"):
         sys.exit(__doc__)
-    token = load_dotenv().get("RAILWAY_PROJECT_TOKEN") or sys.exit(
-        "RAILWAY_PROJECT_TOKEN missing from backend/.env")
+    token = load_dotenv().get("RAILWAY_PROJECT_TOKEN") or sys.exit("RAILWAY_PROJECT_TOKEN missing from the repo-root .env")
     if args[0] == "list":
         cmd_list(token)
     else:

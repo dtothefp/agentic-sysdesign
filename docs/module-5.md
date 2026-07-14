@@ -268,13 +268,13 @@ its keep.
 The digest agent runs on `claude-opus-4-8`. A run costs roughly 63 cents, dominated by
 output tokens and cache writes, with prompt caching doing about 90 percent of the work
 (cache reads bill at a tenth of the input rate, so the large re-sent context is nearly
-free). The model is one line in `m5_agents/agent.yaml`, so dropping to Sonnet or Haiku is a
+free). The model is one line in `packages/agents/agent.yaml`, so dropping to Sonnet or Haiku is a
 one-line change if cost ever matters. Managed Agents bills to the Anthropic API credit
 balance, separate from any Claude subscription.
 
 ## How it's deployed (declarative, one named agent per tier)
 
-The agent isn't stood up by a script that authors JSON. It's declared. `m5_agents/`
+The agent isn't stood up by a script that authors JSON. It's declared. `packages/agents/`
 holds plain YAML that a human can read. `agent.yaml` is the env-agnostic agent config
 (model, system prompt, the MCP toolset), `environment.yaml` is the sandbox, `deployment.yaml`
 is the kickoff message and memory mount, and `vault/` holds the two credential templates

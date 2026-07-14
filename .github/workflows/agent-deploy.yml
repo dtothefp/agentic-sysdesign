@@ -1,6 +1,6 @@
 # Deploy the Module 5 digest agent to the Managed Agents control plane, the
 # standard CI/CD flow: a named agent + named deployment per environment, driven
-# by m5_agents/agentctl.py (a thin `ant` CLI wrapper, see that file).
+# by packages/agents/agentctl.py (a thin `ant` CLI wrapper, see that file).
 #
 #   Manual dispatch  -> one input, the tier. Everything else is inferred:
 #                       - local: branch = the ref you dispatched from; base URL =
@@ -46,7 +46,6 @@ jobs:
 
       - name: Deploy (manual dispatch)
         if: github.event_name == 'workflow_dispatch'
-        working-directory: backend
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SYSDESIGN_API_KEY: ${{ secrets.SYSDESIGN_API_KEY }}
@@ -58,15 +57,14 @@ jobs:
           # (TIER_BASE_URLS) for local and prod; the branch (local only) is the ref
           # this workflow was dispatched from.
           if [ "$TIER" = "local" ]; then
-            python m5_agents/agentctl.py deploy --tier local --branch "$REF_NAME" --sha "$SHA" --run
+            python packages/agents/agentctl.py deploy --tier local --branch "$REF_NAME" --sha "$SHA" --run
           else
-            python m5_agents/agentctl.py deploy --tier prod --sha "$SHA"
+            python packages/agents/agentctl.py deploy --tier prod --sha "$SHA"
           fi
 
       - name: Deploy prod (merge to main)
         if: github.event_name == 'push'
-        working-directory: backend
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SYSDESIGN_API_KEY: ${{ secrets.SYSDESIGN_API_KEY }}
-        run: python m5_agents/agentctl.py deploy --tier prod --sha "${{ github.sha }}"
+        run: python packages/agents/agentctl.py deploy --tier prod --sha "${{ github.sha }}"

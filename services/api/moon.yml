@@ -1,0 +1,50 @@
+# moon project: the FastAPI service. Tasks shell out to uv (system toolchain), so moon is
+# pure orchestration here: task graph, caching, and affected-detection. Cross-project inputs
+# (leading /) are what make the cache honest: editing packages/core invalidates api's test
+# cache even though the file lives outside this project.
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+stack: 'backend'
+layer: 'application'
+language: 'python'
+
+dependsOn:
+  - 'core'
+  - 'task-contract'
+
+tasks:
+  dev:
+    command: 'uv run --package sysdesign-api uvicorn api.main:app --reload --host 0.0.0.0 --port 8000'
+    toolchain: 'system'
+    options:
+      cache: false
+      persistent: true
+
+  lint:
+    script: 'uv run ruff check . && uv run ruff format --check .'
+    toolchain: 'system'
+    inputs:
+      - 'api/**/*.py'
+      - 'tests/**/*.py'
+      - '/pyproject.toml'
+
+  test:
+    command: 'uv run pytest tests'
+    toolchain: 'system'
+    inputs:
+      - 'api/**/*.py'
+      - 'tests/**/*.py'
+      - 'pyproject.toml'
+      - '/packages/core/common/**/*.py'
+      - '/packages/task-contract/task_contract/**/*.py'
+      - '/uv.lock'
+
+  # export the OpenAPI spec the future chat-web app codegens a typed client from.
+  # app.openapi() only introspects the routes, so this needs no running db or server.
+  openapi:
+    script: 'uv run --package sysdesign-api python -c "import json; from api.main import app; print(json.dumps(app.openapi(), indent=2))" > openapi.json'
+    toolchain: 'system'
+    inputs:
+      - 'api/**/*.py'
+    outputs:
+      - 'openapi.json'

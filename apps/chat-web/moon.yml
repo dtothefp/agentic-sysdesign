@@ -1,0 +1,12 @@
+# moon project: the Module 7 chat agent frontend (React over the API's runs/signals
+# surface + the digest agent). Scaffold only for now; tasks arrive with the code. When
+# they do, add the node/pnpm toolchain to .moon/toolchain.yml and codegen the typed API
+# client from services/api's openapi task output (`moon run api:openapi`).
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+stack: 'frontend'
+layer: 'application'
+language: 'typescript'
+
+dependsOn:
+  - 'api'
