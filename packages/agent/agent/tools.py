@@ -154,9 +154,7 @@ class Toolbox:
         # a failed span). traceable is a passthrough when tracing is off (see _trace.py), so this is
         # a plain call in that case, and the wrapper reads the tracing-enabled state per call, not
         # here, so it still honors inert-until-keyed if the env is flipped later.
-        self._traced: dict[str, Callable[..., Any]] = {
-            t.name: traceable(run_type="tool", name=t.name)(t.fn) for t in tools
-        }
+        self._traced: dict[str, Callable[..., Any]] = {t.name: traceable(run_type="tool", name=t.name)(t.fn) for t in tools}
 
     @property
     def schemas(self) -> list[dict]:
