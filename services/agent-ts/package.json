@@ -1,0 +1,31 @@
+{
+  "name": "sysdesign-agent-ts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TypeScript parallel of the sysdesign chat agent. A ReAct loop over the sysdesign REST API, exposed as a CLI and an SSE server, with runAgent as a native async generator.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "chat": "tsx src/cli.ts",
+    "test": "tsx --test test/*.test.ts",
+    "format": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format:fix": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\""
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.65.0",
+    "@hono/node-server": "^1.19.5",
+    "hono": "^4.9.9"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "prettier": "^3.4.2",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}

@@ -9,3 +9,6 @@ packages/agents/output/
 # moon task runner (repo-pinned via package.json) + its cache
 node_modules/
 .moon/cache/
+
+# TS/JS build output (e.g. services/agent-ts/dist)
+dist/

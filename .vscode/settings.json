@@ -6,5 +6,9 @@
   // /workspace/.venv is the host's macOS venv and its binaries can't run on Linux.
   "python.defaultInterpreterPath": "/home/vscode/.venv/bin/python",
   "python.testing.pytestEnabled": true,
-  "python.testing.pytestArgs": ["."]
+  "python.testing.pytestArgs": ["."],
+  // services/agent-ts is its own Node package (not in the uv workspace). Point the TS language
+  // service at its tsconfig + typescript so hono types resolve when editing server.ts, loop.ts, etc.
+  "typescript.tsdk": "services/agent-ts/node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true
 }
