@@ -1,13 +1,15 @@
 {
-  // Debug configs for Cursor/VS Code (Run and Debug panel, or F5). Written for HOST-native
-  // dev, the primary path in CLAUDE.md (brew install moon, Postgres/Redis on localhost).
+  // Debug configs for Cursor/VS Code (Run and Debug panel, or F5). Written to run INSIDE the
+  // dev container (status bar shows "Container sysdesign"), which is the dev environment for
+  // this repo.
   //
-  //   * python  -> ${workspaceFolder}/.venv/bin/python, the one shared uv-workspace venv that
-  //     `uv sync --all-packages` builds. Every workspace member (api, worker, agent, common)
-  //     is installed into it as a real package, so the module paths below resolve from any cwd.
-  //   * In the DEV CONTAINER the venv is /home/vscode/.venv (UV_PROJECT_ENVIRONMENT in
-  //     .devcontainer/compose.yml) and Postgres/Redis are at db:5432 / redis:6379. To debug in
-  //     the container, point `python` at that interpreter and swap the host URLs for those.
+  //   * python -> /home/vscode/.venv/bin/python. The container keeps uv's venv OUTSIDE the
+  //     bind mount on purpose (UV_PROJECT_ENVIRONMENT in .devcontainer/compose.yml), because
+  //     /workspace/.venv is the host's macOS venv and its binaries don't run on Linux. Every
+  //     workspace member (api, worker, agent, common) is installed into it as a real package,
+  //     so run `uv sync --all-packages` in a container terminal once after pulling new deps.
+  //   * Postgres and Redis are the sibling compose services db:5432 / redis:6379.
+  //   * The agent reaches the API at localhost:8000 because both run in THIS container.
   //
   // Two deliberate differences from the `moon run ...:dev` commands:
   //   * No --reload on servers. The uvicorn reloader spawns a child process and breakpoints
@@ -28,7 +30,7 @@
       "module": "agent",
       "args": ["what creators are on the watchlist?"],
       "cwd": "${workspaceFolder}",
-      "python": "${workspaceFolder}/.venv/bin/python",
+      "python": "/home/vscode/.venv/bin/python",
       "console": "integratedTerminal",
       "justMyCode": false,
       "env": {
@@ -43,9 +45,9 @@
       "type": "debugpy",
       "request": "launch",
       "module": "uvicorn",
-      "args": ["agent.server:app", "--host", "127.0.0.1", "--port", "8100"],
+      "args": ["agent.server:app", "--host", "0.0.0.0", "--port", "8100"],
       "cwd": "${workspaceFolder}",
-      "python": "${workspaceFolder}/.venv/bin/python",
+      "python": "/home/vscode/.venv/bin/python",
       "console": "integratedTerminal",
       "justMyCode": false,
       "env": {
@@ -59,14 +61,14 @@
       "module": "uvicorn",
       "args": ["api.main:app", "--host", "0.0.0.0", "--port", "8000"],
       "cwd": "${workspaceFolder}",
-      "python": "${workspaceFolder}/.venv/bin/python",
+      "python": "/home/vscode/.venv/bin/python",
       "console": "integratedTerminal",
       "justMyCode": false,
       "env": {
-        "DATABASE_URL": "postgresql://lab:lab@localhost:5432/sysdesign",
-        "REDIS_URL": "redis://localhost:6379",
-        "CELERY_BROKER_URL": "redis://localhost:6379/0",
-        "CELERY_RESULT_BACKEND": "redis://localhost:6379/1"
+        "DATABASE_URL": "postgresql://lab:lab@db:5432/sysdesign",
+        "REDIS_URL": "redis://redis:6379",
+        "CELERY_BROKER_URL": "redis://redis:6379/0",
+        "CELERY_RESULT_BACKEND": "redis://redis:6379/1"
       }
     },
     {
@@ -76,14 +78,14 @@
       "module": "celery",
       "args": ["-A", "worker.celery_app", "worker", "--loglevel", "INFO", "--pool", "solo"],
       "cwd": "${workspaceFolder}",
-      "python": "${workspaceFolder}/.venv/bin/python",
+      "python": "/home/vscode/.venv/bin/python",
       "console": "integratedTerminal",
       "justMyCode": false,
       "env": {
-        "DATABASE_URL": "postgresql://lab:lab@localhost:5432/sysdesign",
-        "REDIS_URL": "redis://localhost:6379",
-        "CELERY_BROKER_URL": "redis://localhost:6379/0",
-        "CELERY_RESULT_BACKEND": "redis://localhost:6379/1"
+        "DATABASE_URL": "postgresql://lab:lab@db:5432/sysdesign",
+        "REDIS_URL": "redis://redis:6379",
+        "CELERY_BROKER_URL": "redis://redis:6379/0",
+        "CELERY_RESULT_BACKEND": "redis://redis:6379/1"
       }
     }
   ],
