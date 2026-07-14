@@ -100,7 +100,8 @@ async def chat(body: ChatIn):
         sentinel = object()
         while True:
             ev = await asyncio.to_thread(next, it, sentinel)
-            if ev is sentinel: break
+            if ev is sentinel:
+                break
             yield {"event": ev["type"], "data": json.dumps(ev, default=str)}
 
     return EventSourceResponse(gen())

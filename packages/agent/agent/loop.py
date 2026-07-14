@@ -26,24 +26,36 @@ event in a worker thread rather than the loop pretending to be async.
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Callable, Iterator
+from typing import Any
 
 from anthropic import Anthropic
 from common.env import load_local_env
 
 from ._trace import traceable, wrap_anthropic  # noqa: F401 - wrap_anthropic is for the anthropic_complete you build
-from .tools import Toolbox, default_toolbox  # noqa: F401 - default_toolbox is for the run_agent you build
+from .tools import TOOL_SCHEMAS, run_tool
 
 load_local_env()  # so ANTHROPIC_API_KEY (and the LANGSMITH_* tracing vars) from the root .env are
 # present before Anthropic() and the first traced call read them
+
+_anthropic_client = wrap_anthropic(Anthropic())  # one client per process, reused across turns
 
 DEFAULT_MODEL = os.environ.get("CHAT_MODEL", "claude-sonnet-5")
 MAX_TOKENS = 4096  # cap on the model's output per turn. Big enough that a long summary isn't
 # truncated mid-sentence (a real bug the Python prod agent hit at 1024). Interview note: this is
 # an OUTPUT cap, not the context window.
 
-SYSTEM = "You are a helpful assistant. Keep answers short and concrete."
+SYSTEM = (
+    "You are the sysdesign assistant, a data agent over Defrag's influencer-intelligence system. "
+    "Use the tools to answer questions about tracked creators, their scraped signals, the AI "
+    "relevance ratings, background scrape runs, and the weekly digests. For questions about what "
+    "creators have said on a TOPIC (rather than by time or rating), use search_signals. When the user asks you to "
+    "DO something, like start a scrape, call the tool and then report what happened, including any "
+    "id the caller can follow up with. Default runs to demo mode unless the user asks for live. "
+    "Keep answers short and concrete."
+)
 
 # complete(messages, tool_schemas, system, model) -> yields {"type":"text_delta","text":..}
 # events, then exactly one {"type":"final","content":[blocks],"stop_reason":..}. Blocks are plain
@@ -84,7 +96,6 @@ def simple_complete(
 
 def anthropic_complete(messages: list[dict], tool_schemas: list[dict], system: str, model: str) -> Iterator[dict]:
     """One streamed model turn via the Anthropic SDK. No tools until tool_schemas is non-empty."""
-    client = wrap_anthropic(Anthropic())
     stream_kwargs: dict = {
         "model": model,
         "max_tokens": MAX_TOKENS,
@@ -94,7 +105,7 @@ def anthropic_complete(messages: list[dict], tool_schemas: list[dict], system: s
     if tool_schemas:
         stream_kwargs["tools"] = tool_schemas
 
-    with client.messages.stream(**stream_kwargs) as stream:
+    with _anthropic_client.messages.stream(**stream_kwargs) as stream:
         for text in stream.text_stream:
             yield {"type": "text_delta", "text": text}
         final = stream.get_final_message()
@@ -120,7 +131,6 @@ def _turn_inputs(inputs: dict) -> dict:
 def run_agent(
     user_message: str,
     *,
-    # toolbox: Toolbox | None = None,
     system: str = SYSTEM,
     model: str = DEFAULT_MODEL,
     max_turns: int = 8,
@@ -158,11 +168,10 @@ def run_agent(
     >>> Python generators + `yield`: https://docs.python.org/3/howto/functional.html#generators
     """
     messages = list(history or []) + [{"role": "user", "content": user_message}]
-    tool_schemas: list[dict] = []  # no tools yet
 
     for turn in range(1, max_turns + 1):
         final: dict | None = None
-        for ev in anthropic_complete(messages, tool_schemas, system, model):
+        for ev in anthropic_complete(messages, TOOL_SCHEMAS, system, model):
             if ev["type"] == "text_delta":
                 yield {"type": "text", "text": ev["text"]}
             elif ev["type"] == "final":
@@ -179,8 +188,26 @@ def run_agent(
             yield {"type": "done", "stop_reason": final["stop_reason"], "turns": turn}
             return
 
-        # Tool round: build this next when you wire up toolbox.run(...)
-        yield {"type": "error", "error": "model asked for tools but tool dispatch is not built yet"}
-        return
+        tool_results: list[dict] = []
+        for block in final["content"]:
+            if block["type"] != "tool_use":
+                continue
+            yield {"type": "tool_use", "id": block["id"], "name": block["name"], "input": block["input"]}
+            try:
+                result: Any = run_tool(block["name"], block["input"])
+                ok = True
+            except Exception as e:  # noqa: BLE001 - a failing tool must be recoverable, not fatal
+                result = f"{type(e).__name__}: {e}"
+                ok = False
+            yield {"type": "tool_result", "id": block["id"], "name": block["name"], "ok": ok, "result": result}
+            tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": block["id"],
+                    "content": json.dumps(result, default=str),
+                    "is_error": not ok,
+                }
+            )
+        messages.append({"role": "user", "content": tool_results})
 
     yield {"type": "error", "error": f"hit max_turns={max_turns} without a final answer"}
