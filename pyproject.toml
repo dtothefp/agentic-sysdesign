@@ -21,6 +21,7 @@ dev = [
   "pytest>=8.0",
   "ruff>=0.6",
   "httpx>=0.27", # required by starlette/fastapi TestClient in the API tests
+  "debugpy>=1.8", # the .vscode/launch.json debug configs (F5 in Cursor/VS Code)
 ]
 
 [tool.ruff]
