@@ -1,0 +1,49 @@
+# moon project: the Module 7 chat agent (Python). A ReAct loop over the sysdesign REST API,
+# exposed as a CLI and a /chat SSE server off one generator. Application tier, but it never
+# deploys as its own Railway service yet; for now it runs locally against the api (local or the
+# deployed prod URL via SYSDESIGN_API_URL). Depends on core only for the .env loader.
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+stack: 'backend'
+layer: 'application'
+language: 'python'
+
+dependsOn:
+  - 'core'
+
+tasks:
+  # stream one agent turn to stdout. PROMPT='what creators do we track?' moon run agent:chat
+  # (env var, not a positional: moon doesn't forward `--` args into script tasks)
+  chat:
+    script: |
+      [ -n "$PROMPT" ] || { echo "usage: PROMPT='your question' moon run agent:chat"; exit 1; }
+      uv run --package sysdesign-agent python -m agent "$PROMPT"
+    toolchain: 'system'
+    options:
+      cache: false
+
+  # the SSE transport the future chat-web UI dials. Separate port from the api (8000).
+  dev:
+    command: 'uv run --package sysdesign-agent uvicorn agent.server:app --reload --host 0.0.0.0 --port 8100'
+    toolchain: 'system'
+    options:
+      cache: false
+      persistent: true
+
+  lint:
+    script: 'uv run ruff check . && uv run ruff format --check .'
+    toolchain: 'system'
+    inputs:
+      - 'agent/**/*.py'
+      - 'tests/**/*.py'
+      - '/pyproject.toml'
+
+  test:
+    command: 'uv run pytest tests'
+    toolchain: 'system'
+    inputs:
+      - 'agent/**/*.py'
+      - 'tests/**/*.py'
+      - 'pyproject.toml'
+      - '/packages/core/common/**/*.py'
+      - '/uv.lock'

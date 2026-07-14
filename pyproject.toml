@@ -10,6 +10,7 @@ members = [
   "packages/core",
   "packages/task-contract",
   "packages/agents",
+  "packages/agent",
 ]
 
 [dependency-groups]
@@ -42,7 +43,7 @@ extend-immutable-calls = ["fastapi.Query", "fastapi.Depends", "fastapi.Path", "f
 # One pytest invocation from the root covers every member's tests. The workspace members
 # are installed into the shared .venv (real packages now, not a pythonpath hack), so tests
 # import `api`, `common`, `worker`, `task_contract` the same way the services do.
-testpaths = ["services/api/tests", "packages/core/tests"]
+testpaths = ["services/api/tests", "packages/core/tests", "packages/agent/tests"]
 markers = [
   "integration: needs a live Postgres/Redis (skipped when the DB is unreachable)",
 ]
