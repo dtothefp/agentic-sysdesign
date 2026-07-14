@@ -19,6 +19,8 @@ api's run/digest streams use, so the wire format is identical: one SSE event per
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import secrets
 
@@ -89,4 +91,16 @@ async def chat(body: ChatIn):
     >>> asyncio.to_thread: https://docs.python.org/3/library/asyncio-task.html#asyncio.to_thread
     >>> sse-starlette EventSourceResponse: https://github.com/sysid/sse-starlette
     """
-    raise NotImplementedError("build the /chat SSE bridge: pull the sync run_agent generator via asyncio.to_thread")
+
+    def _get_events():
+        return run_agent(body.message, history=body.history)
+
+    async def gen():
+        it = await asyncio.to_thread(_get_events)
+        sentinel = object()
+        while True:
+            ev = await asyncio.to_thread(next, it, sentinel)
+            if ev is sentinel: break
+            yield {"event": ev["type"], "data": json.dumps(ev, default=str)}
+
+    return EventSourceResponse(gen())

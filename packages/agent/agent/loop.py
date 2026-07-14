@@ -29,6 +29,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Iterator
 
+from anthropic import Anthropic
 from common.env import load_local_env
 
 from ._trace import traceable, wrap_anthropic  # noqa: F401 - wrap_anthropic is for the anthropic_complete you build
@@ -42,15 +43,7 @@ MAX_TOKENS = 4096  # cap on the model's output per turn. Big enough that a long 
 # truncated mid-sentence (a real bug the Python prod agent hit at 1024). Interview note: this is
 # an OUTPUT cap, not the context window.
 
-SYSTEM = (
-    "You are the sysdesign assistant, a data agent over Defrag's influencer-intelligence system. "
-    "Use the tools to answer questions about tracked creators, their scraped signals, the AI "
-    "relevance ratings, background scrape runs, and the weekly digests. For questions about what "
-    "creators have said on a TOPIC (rather than by time or rating), use search_signals. When the user asks you to "
-    "DO something, like start a scrape, call the tool and then report what happened, including any "
-    "id the caller can follow up with. Default runs to demo mode unless the user asks for live. "
-    "Keep answers short and concrete."
-)
+SYSTEM = "You are a helpful assistant. Keep answers short and concrete."
 
 # complete(messages, tool_schemas, system, model) -> yields {"type":"text_delta","text":..}
 # events, then exactly one {"type":"final","content":[blocks],"stop_reason":..}. Blocks are plain
@@ -58,31 +51,62 @@ SYSTEM = (
 Complete = Callable[[list[dict], list[dict], str, str], Iterator[dict]]
 
 
-def anthropic_complete(messages: list[dict], tool_schemas: list[dict], system: str, model: str) -> Iterator[dict]:
-    """The real model call: one streamed turn off the Anthropic SDK.
+def simple_complete(
+    messages: list[dict],
+    tool_schemas: list[dict],  # noqa: ARG001 - real completes pass tool schemas to the model
+    system: str,  # noqa: ARG001
+    model: str,  # noqa: ARG001
+) -> Iterator[dict]:
+    """Toy `complete` for learning the contract. No Anthropic client, no network.
 
-    >>> BUILD THIS. Nothing in the unit tests calls it (they inject a scripted `complete`), so it
-    >>> has no test to satisfy; you exercise it by running `python -m agent "..."` against a live
-    >>> api. Match the `Complete` contract exactly so run_agent stays model-agnostic.
+    `complete` means "one model turn": stream some tokens, then hand back one final message.
+    `run_agent` calls it once per loop iteration and owns the transcript (messages list).
 
-    What it must do:
-      1. Create an Anthropic client: `client = wrap_anthropic(Anthropic())`. The wrap_anthropic
-         seam turns the streamed call into a LangSmith span when tracing is on, and is a no-op
-         otherwise (see _trace.py). Anthropic() reads ANTHROPIC_API_KEY from the environment.
-      2. Open a streaming turn: `with client.messages.stream(model=, max_tokens=MAX_TOKENS,
-         system=, tools=tool_schemas, messages=messages) as stream:`.
-      3. For each text token off `stream.text_stream`, yield {"type":"text_delta","text": token}.
-         (That yield is what makes tokens appear live in the CLI and the SSE UI.)
-      4. After the stream is exhausted, get the final message (`stream.get_final_message()`) and
-         normalize its `.content` blocks into PLAIN DICTS so the rest of the loop never touches
-         SDK objects: a text block -> {"type":"text","text": block.text}, a tool_use block ->
-         {"type":"tool_use","id": block.id, "name": block.name, "input": block.input}.
-      5. yield exactly one {"type":"final","content": <those dicts>, "stop_reason": final.stop_reason}.
-
-    Docs: https://docs.claude.com/en/api/messages-streaming  and the tool-use guide
-    https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview
+    Try it in a REPL:
+        list(simple_complete([{"role": "user", "content": "hello"}], [], SYSTEM, "fake"))
     """
-    raise NotImplementedError("build anthropic_complete: stream a turn, yield text_delta events, then one final")
+    last = messages[-1]["content"] if messages else ""
+    if isinstance(last, list):
+        # After a tool round, Anthropic-shaped transcripts carry tool_result blocks here.
+        reply = "Thanks, I saw your tool results."
+    else:
+        reply = f"You said: {last}"
+
+    for word in reply.split():
+        yield {"type": "text_delta", "text": word + " "}
+
+    yield {
+        "type": "final",
+        "content": [{"type": "text", "text": reply}],
+        "stop_reason": "end_turn",
+    }
+
+
+def anthropic_complete(messages: list[dict], tool_schemas: list[dict], system: str, model: str) -> Iterator[dict]:
+    """One streamed model turn via the Anthropic SDK. No tools until tool_schemas is non-empty."""
+    client = wrap_anthropic(Anthropic())
+    stream_kwargs: dict = {
+        "model": model,
+        "max_tokens": MAX_TOKENS,
+        "system": system,
+        "messages": messages,
+    }
+    if tool_schemas:
+        stream_kwargs["tools"] = tool_schemas
+
+    with client.messages.stream(**stream_kwargs) as stream:
+        for text in stream.text_stream:
+            yield {"type": "text_delta", "text": text}
+        final = stream.get_final_message()
+
+    content: list[dict] = []
+    for block in final.content:
+        if block.type == "text":
+            content.append({"type": "text", "text": block.text})
+        elif block.type == "tool_use":
+            content.append({"type": "tool_use", "id": block.id, "name": block.name, "input": block.input})
+
+    yield {"type": "final", "content": content, "stop_reason": final.stop_reason}
 
 
 def _turn_inputs(inputs: dict) -> dict:
@@ -96,8 +120,7 @@ def _turn_inputs(inputs: dict) -> dict:
 def run_agent(
     user_message: str,
     *,
-    complete: Complete | None = None,
-    toolbox: Toolbox | None = None,
+    # toolbox: Toolbox | None = None,
     system: str = SYSTEM,
     model: str = DEFAULT_MODEL,
     max_turns: int = 8,
@@ -108,6 +131,7 @@ def run_agent(
       {"type":"text","text":..}                              a streamed answer token
       {"type":"tool_use","id":..,"name":..,"input":..}       the model asked to call a tool
       {"type":"tool_result","id":..,"name":..,"ok":bool,"result":..}   what the tool returned
+      {"type":"final","content":[..],"stop_reason":..}        full assistant message for this turn
       {"type":"done","stop_reason":..,"turns":n}             terminal, the answer is complete
       {"type":"error","error":..}                            no final message, or max_turns hit
 
@@ -133,4 +157,30 @@ def run_agent(
     >>> The three tests to make green: tool-call-then-answer, tool-error-is-recoverable, max_turns_guard.
     >>> Python generators + `yield`: https://docs.python.org/3/howto/functional.html#generators
     """
-    raise NotImplementedError("build run_agent: the ReAct loop. Make tests/test_loop.py green.")
+    messages = list(history or []) + [{"role": "user", "content": user_message}]
+    tool_schemas: list[dict] = []  # no tools yet
+
+    for turn in range(1, max_turns + 1):
+        final: dict | None = None
+        for ev in anthropic_complete(messages, tool_schemas, system, model):
+            if ev["type"] == "text_delta":
+                yield {"type": "text", "text": ev["text"]}
+            elif ev["type"] == "final":
+                final = ev
+
+        if final is None:
+            yield {"type": "error", "error": "model produced no final message"}
+            return
+
+        messages.append({"role": "assistant", "content": final["content"]})
+
+        if final["stop_reason"] != "tool_use":
+            yield {"type": "final", "content": final["content"], "stop_reason": final["stop_reason"]}
+            yield {"type": "done", "stop_reason": final["stop_reason"], "turns": turn}
+            return
+
+        # Tool round: build this next when you wire up toolbox.run(...)
+        yield {"type": "error", "error": "model asked for tools but tool dispatch is not built yet"}
+        return
+
+    yield {"type": "error", "error": f"hit max_turns={max_turns} without a final answer"}
