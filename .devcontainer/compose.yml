@@ -55,11 +55,6 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ..:/workspace:cached
-      # mask the bind-mounted node_modules with a container-local volume: the host's
-      # holds the macOS moon binary and a Linux container needs its own. Same cross-OS
-      # problem UV_PROJECT_ENVIRONMENT solves for .venv below. postCreate's
-      # `pnpm install` populates it on first create.
-      - node_modules:/workspace/node_modules
     command: sleep infinity
     # Load the root .env into the container's environment (same pattern as the beeks
     # devcontainer, but pointed at the one secrets file this repo already has instead
@@ -103,4 +98,3 @@ services:
 volumes:
   pgdata:
   ollama:
-  node_modules:

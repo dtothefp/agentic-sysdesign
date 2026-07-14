@@ -43,18 +43,19 @@ infra/            Railway env-var sync + preview-env scripts
 .devcontainer/    reproducible container with its own sibling Postgres
 ```
 
-Run everything from the repo root. `pnpm install` puts the repo-pinned moon at
-`node_modules/.bin/moon` (use `pnpm moon ...` if that's not on your PATH), and
-`uv sync --all-packages` installs the whole Python workspace.
+Run everything from the repo root. moon is a standalone Rust binary (`brew install moon`),
+and `uv sync --all-packages` installs the whole Python workspace. No node or pnpm anywhere.
+The moon version is pinned in `.moon/workspace.yml`, and the containers fetch a matching
+release binary directly.
 
 ## Quick start (local)
 
-Needs Docker, `uv`, `psql`, `dbmate` (`brew install dbmate`), and `pnpm` on the host. The
-dev container has all five preinstalled, so in Cursor you skip straight to
+Needs Docker, `uv`, `psql`, `dbmate` (`brew install dbmate`), and `moon` (`brew install moon`)
+on the host. The dev container has all five preinstalled, so in Cursor you skip straight to
 `moon run core:db-init`.
 
 ```bash
-pnpm install && uv sync --all-packages
+uv sync --all-packages
 moon run root:setup    # db up + migrate + seed, one shot
 moon run core:drills   # run the six EXPLAIN drills (whole file, smoke test)
 # or open an interactive shell to study one plan at a time:

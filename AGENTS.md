@@ -116,8 +116,10 @@ and moon is the ONE task runner (no Makefile). Tasks live in the project that ow
 db lifecycle in `packages/core` (it owns the migrations), agent hand-cranks in
 `packages/agents`, dev servers in `services/*`, and workspace lifecycle (compose up/down,
 setup, format, ollama-pull) in the root-level moon project (`moon.yml` at the repo root).
-moon is repo-pinned via `package.json`; `pnpm install` puts it at `node_modules/.bin/moon`
-(use `pnpm moon ...` if that's not on your PATH).
+moon is a standalone Rust binary, not a node package. Install it with `brew install moon`
+on the host; the dev container and Cursor Cloud VM fetch a pinned release binary in their
+own setup. The version is pinned in `.moon/workspace.yml` (`versionConstraint`), so there
+is no `package.json`, no pnpm, and no node in the backend toolchain.
 
 ```
 moon.yml          root moon project: workspace lifecycle tasks (root:up, root:setup, ...)
@@ -133,8 +135,9 @@ infra/            Railway env-var sync + preview-env scripts
 .devcontainer/    reproducible container (its own sibling Postgres at db:5432)
 ```
 
-Run everything from the repo root. `pnpm install && uv sync --all-packages` installs the
-task runner and every member; `uv run --package sysdesign-api ...` targets one.
+Run everything from the repo root. `brew install moon` gets the task runner (once), and
+`uv sync --all-packages` installs every workspace member; `uv run --package sysdesign-api ...`
+targets one.
 
 ## Stack
 
@@ -228,8 +231,9 @@ introducing a list in body text. Use contractions.
 
 The Cloud VM runs the stack natively (no Docker, no `.devcontainer/compose.yml`). Postgres 16
 + pgvector, Redis, `uv`, and `dbmate` are baked into the VM image; `.cursor/environment.json`'s
-install step adds pnpm + the repo-pinned moon when node is available (if it isn't, fall back to
-the underlying `uv run ...`/`dbmate ...` commands the moon tasks wrap). The code's env defaults
+install step fetches the pinned moon release binary into `$HOME/.local/bin` (arch-matched,
+no node). If moon is somehow missing, every task just wraps `uv run ...`/`dbmate ...`, so you
+can always call those directly. The code's env defaults
 (`DATABASE_URL=postgresql://lab:lab@localhost:5432/sysdesign`, `REDIS_URL=redis://localhost:6379`,
 Celery on the same Redis) already point at localhost, so no `.env` or exported URLs are needed
 for local dev. The `lab` Postgres role is a superuser (so migrations can `CREATE EXTENSION vector`).

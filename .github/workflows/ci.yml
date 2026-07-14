@@ -63,8 +63,9 @@ jobs:
             https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64
           sudo chmod +x /usr/local/bin/dbmate
 
-      # dbmate invoked directly instead of through moon: this job deliberately has no
-      # node/pnpm, and the flags match packages/core/moon.yml's migrate task.
+      # dbmate invoked directly instead of through moon: CI has no reason to install the
+      # task runner just to call one wrapped command, and the flags match
+      # packages/core/moon.yml's migrate task.
       - name: Apply migrations
         run: dbmate --no-dump-schema --migrations-dir packages/core/db/migrations --url "$DATABASE_URL?sslmode=disable" up
 

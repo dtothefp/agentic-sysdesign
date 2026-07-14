@@ -1,5 +1,5 @@
 {
-  "install": "sudo apt-get update && sudo apt-get install -y postgresql-client && curl -LsSf https://astral.sh/uv/install.sh | sh -s -- -y && $HOME/.local/bin/uv sync --all-packages && (command -v npm >/dev/null && sudo npm install -g pnpm@10.12.1 && pnpm install || echo 'node unavailable; moon tasks unavailable, call uv/dbmate directly')",
+  "install": "sudo apt-get update && sudo apt-get install -y postgresql-client xz-utils && curl -LsSf https://astral.sh/uv/install.sh | sh -s -- -y && $HOME/.local/bin/uv sync --all-packages && mkdir -p $HOME/.local/bin && (case \"$(dpkg --print-architecture)\" in amd64) T=x86_64-unknown-linux-gnu;; arm64) T=aarch64-unknown-linux-gnu;; *) T=;; esac && [ -n \"$T\" ] && curl -fsSL \"https://github.com/moonrepo/moon/releases/download/v2.4.3/moon_cli-${T}.tar.xz\" | tar -xJ -C $HOME/.local/bin --strip-components=1 \"moon_cli-${T}/moon\" \"moon_cli-${T}/moonx\" && chmod +x $HOME/.local/bin/moon || echo 'unsupported arch; call uv/dbmate directly')",
   "start": "docker compose up -d db",
   "terminals": [
     {

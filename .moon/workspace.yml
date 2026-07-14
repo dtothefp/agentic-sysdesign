@@ -6,6 +6,13 @@
 # This dir doubles as the workspace-root marker common/env.py anchors its .env search on.
 $schema: 'https://moonrepo.dev/schemas/workspace.json'
 
+# Pin the moon version. moon is installed as a native binary (brew on the host, a
+# pinned GitHub-release tarball in .devcontainer/Dockerfile and .cursor/environment.json),
+# not as a node package, so there is no package.json/lockfile to hold the version. This
+# constraint is the one source of truth: a stale local moon fails loudly instead of
+# silently drifting. Keep it in step with MOON_VERSION in the two installers.
+versionConstraint: '>=2.4.0'
+
 # Mixed form: globs for the three tiers, plus an explicit root project. The root
 # project (moon.yml at the repo root) owns workspace-level lifecycle tasks that
 # belong to no single member: docker compose up/down, setup/reset, ollama-pull,
