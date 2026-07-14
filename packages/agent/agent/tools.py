@@ -1,5 +1,12 @@
 """The agent's tool layer: thin, synchronous HTTP clients of the sysdesign REST API.
 
+>>> PARTIALLY STRIPPED FOR STUDY. The framework (Tool, Toolbox, DEFAULT_TOOLS, default_toolbox,
+>>> _client) is intact, and `search_signals` is left implemented as a WORKED EXAMPLE. The other
+>>> seven tool functions are stubbed to `raise NotImplementedError`: fill each one in by copying
+>>> the search_signals shape and pointing it at the endpoint named in its docstring. These have no
+>>> unit tests (test_loop.py uses fake tools), so you check them by running the CLI/server against
+>>> a live api. See BUILD_FROM_SCRATCH.md. The endpoints live in services/api (see its /docs).
+
 Design choice worth saying out loud (it's the interview point): the agent is a CLIENT of the
 data API, not code fused into it. Every tool is one `httpx` call to services/api, authenticated
 by the same X-API-Key the rest of the app uses. That means the exact same loop can point at a
@@ -18,7 +25,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta  # noqa: F401 - kept for the list_recent_signals stub you'll build
 from typing import Any
 
 import httpx
@@ -48,78 +55,59 @@ def _client() -> httpx.Client:
 
 
 def list_influencers() -> list[dict]:
-    """The creators on Defrag's watchlist (name, handle, last_scraped_at)."""
-    with _client() as c:
-        r = c.get("/influencers")
-        r.raise_for_status()
-        return r.json()
+    """The creators on Defrag's watchlist (name, handle, last_scraped_at).
+
+    >>> BUILD THIS. GET /influencers, no params. Copy the search_signals shape below."""
+    raise NotImplementedError("GET /influencers")
 
 
 def list_ratings(min_relevance: float | None = None, limit: int = 20) -> list[dict]:
     """Recent per-signal AI ratings, newest first. min_relevance filters to what the model
-    judged on-thesis for Defrag's AI-research angle (0 to 1)."""
-    params: dict[str, Any] = {"limit": limit}
-    if min_relevance is not None:
-        params["min_relevance"] = min_relevance
-    with _client() as c:
-        r = c.get("/ratings", params=params)
-        r.raise_for_status()
-        return r.json()
+    judged on-thesis for Defrag's AI-research angle (0 to 1).
+
+    >>> BUILD THIS. GET /ratings with params {"limit": limit} plus "min_relevance" only when set."""
+    raise NotImplementedError("GET /ratings?limit=&min_relevance=")
 
 
 def list_recent_signals(hours: int = 24, influencer_id: int | None = None, limit: int = 50) -> list[dict]:
     """Raw signals captured in the last `hours` hours. The API requires a time window (it's the
-    partition key), so this computes now-minus-hours to now and passes it through."""
-    now = datetime.now(UTC)
-    params: dict[str, Any] = {
-        "from": (now - timedelta(hours=hours)).isoformat(),
-        "to": now.isoformat(),
-        "limit": limit,
-    }
-    if influencer_id is not None:
-        params["influencer_id"] = influencer_id
-    with _client() as c:
-        r = c.get("/signals", params=params)
-        r.raise_for_status()
-        return r.json()
+    partition key), so this computes now-minus-hours to now and passes it through.
+
+    >>> BUILD THIS. GET /signals with params from/to (ISO timestamps: now-hours .. now, use
+    >>> datetime.now(UTC) and timedelta, both already imported), limit, optional influencer_id."""
+    raise NotImplementedError("GET /signals?from=&to=&limit=&influencer_id=")
 
 
 def trigger_run(mode: str = "demo", model: str | None = None) -> dict:
     """Kick off a fan-out scrape run. mode is 'demo' (synthetic signals, no scraper spend) or
     'live' (real Apify scrape). Optional model ('provider/model') turns on AI rating for the run.
-    Returns the run_id immediately; the work happens in the background, poll it with get_run."""
-    body: dict[str, Any] = {"mode": mode}
-    if model is not None:
-        body["model"] = model
-    with _client() as c:
-        r = c.post("/runs", json=body)
-        r.raise_for_status()
-        return r.json()
+    Returns the run_id immediately; the work happens in the background, poll it with get_run.
+
+    >>> BUILD THIS. POST /runs with json body {"mode": mode} plus "model" only when set.
+    >>> (This is the only WRITE tool: c.post(..., json=body), not c.get.)"""
+    raise NotImplementedError("POST /runs {mode, model?}")
 
 
 def get_run(run_id: int) -> dict:
-    """Current state of one run (status, done_count, total, rated_count, timestamps)."""
-    with _client() as c:
-        r = c.get(f"/runs/{run_id}")
-        r.raise_for_status()
-        return r.json()
+    """Current state of one run (status, done_count, total, rated_count, timestamps).
+
+    >>> BUILD THIS. GET /runs/{run_id} (path param, no query)."""
+    raise NotImplementedError("GET /runs/{run_id}")
 
 
 def list_digests(limit: int = 5) -> list[dict]:
     """Recent agent-written weekly digests (id, status, word_count, created_at). Fetch the body
-    of one via get_digest so the model doesn't pull every digest's full markdown at once."""
-    with _client() as c:
-        r = c.get("/digests", params={"limit": limit})
-        r.raise_for_status()
-        return r.json()
+    of one via get_digest so the model doesn't pull every digest's full markdown at once.
+
+    >>> BUILD THIS. GET /digests with params {"limit": limit}."""
+    raise NotImplementedError("GET /digests?limit=")
 
 
 def get_digest(digest_id: int) -> dict:
-    """One digest including its markdown content, once the digest agent has delivered it."""
-    with _client() as c:
-        r = c.get(f"/digests/{digest_id}")
-        r.raise_for_status()
-        return r.json()
+    """One digest including its markdown content, once the digest agent has delivered it.
+
+    >>> BUILD THIS. GET /digests/{digest_id} (path param)."""
+    raise NotImplementedError("GET /digests/{digest_id}")
 
 
 def search_signals(q: str, limit: int = 20) -> dict:
@@ -127,7 +115,11 @@ def search_signals(q: str, limit: int = 20) -> dict:
     Postgres full-text plus pgvector, fused with RRF. This is how the chat agent answers content
     questions ('what have creators said about MCP?', 'any posts on evals?') that the time-windowed
     and rating-filtered lists can't. Each hit reports which halves found it and a fused score; the
-    response's `semantic` flag is false when no embedding model is keyed (lexical-only, still useful)."""
+    response's `semantic` flag is false when no embedding model is keyed (lexical-only, still useful).
+
+    WORKED EXAMPLE, left implemented. Copy this shape for the seven stubs above: build a client,
+    GET the endpoint with its params, raise_for_status, return .json().
+    """
     with _client() as c:
         r = c.get("/search", params={"q": q, "limit": limit})
         r.raise_for_status()
