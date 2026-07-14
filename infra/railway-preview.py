@@ -25,9 +25,13 @@ What "up" does, in order, all idempotent:
   2. deploymentTriggerUpdate on every cloned trigger (api + worker) so they
      track the PR branch instead of main. After this, pushes to the PR branch
      auto-deploy to the preview env, no Action run needed.
-  3. serviceDomainCreate for the api if it doesn't have one (clones don't copy
+  3. serviceInstanceUpdate on api + worker to pin rootDirectory + the
+     railway.json path (SERVICE_SOURCE below). Clones inherit production's
+     settings, so a PR that moves those files would otherwise build the branch
+     with the old paths and fail before its own config is ever read.
+  4. serviceDomainCreate for the api if it doesn't have one (clones don't copy
      domains). Railway assigns something like api-pr-42.up.railway.app.
-  4. serviceInstanceDeployV2 for redis, worker, api, the initial deploys that
+  5. serviceInstanceDeployV2 for redis, worker, api, the initial deploys that
      step 1 skipped.
 
 Migrations do NOT run in preview environments. services/api/railway.json scopes
@@ -56,6 +60,14 @@ SERVICES = {
 }
 # redis first so the broker is coming up while api/worker build
 DEPLOY_ORDER = ["redis", "worker", "api"]
+
+# Where each repo-backed service's source lives on THIS branch. Applied to the
+# cloned instances every `up`, so previews always build with the checked-out
+# layout even while production's settings still point at an older one.
+SERVICE_SOURCE = {
+    "api": {"rootDirectory": "/", "railwayConfigFile": "/services/api/railway.json"},
+    "worker": {"rootDirectory": "/", "railwayConfigFile": "/services/worker/railway.json"},
+}
 
 
 def load_token() -> str:
@@ -152,6 +164,14 @@ def cmd_up(token: str, pr: str, branch: str) -> None:
             print(f"trigger {trig['serviceId'][:8]}: {trig['branch']} -> {branch}")
         else:
             print(f"trigger {trig['serviceId'][:8]}: already on {branch}")
+
+    # pin api + worker source paths to this branch's layout (clones inherit prod's)
+    m = """mutation($serviceId: String!, $environmentId: String!, $input: ServiceInstanceUpdateInput!) {
+      serviceInstanceUpdate(serviceId: $serviceId, environmentId: $environmentId, input: $input)
+    }"""
+    for svc, source in SERVICE_SOURCE.items():
+        gql(token, m, {"serviceId": SERVICES[svc], "environmentId": env_id, "input": source})
+        print(f"source pinned: {svc} -> {source['railwayConfigFile']}")
 
     # the api needs a Railway-provided domain (domains aren't cloned)
     domain = None
