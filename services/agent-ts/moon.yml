@@ -26,8 +26,32 @@ tasks:
     options:
       cache: false
 
+  # house toolchain: oxfmt (format), oxlint (lint), knip (unused deps/exports), tsgo (fast TS check).
+  format:
+    command: 'node_modules/.bin/oxfmt --check .'
+    toolchain: 'system'
+    inputs:
+      - 'src/**/*.ts'
+      - 'test/**/*.ts'
+
+  lint:
+    command: 'node_modules/.bin/oxlint .'
+    toolchain: 'system'
+    inputs:
+      - 'src/**/*.ts'
+      - 'test/**/*.ts'
+
+  knip:
+    command: 'node_modules/.bin/knip'
+    toolchain: 'system'
+    inputs:
+      - 'src/**/*.ts'
+      - 'test/**/*.ts'
+      - 'knip.config.ts'
+      - 'package.json'
+
   typecheck:
-    command: 'node_modules/.bin/tsc --noEmit -p tsconfig.test.json'
+    command: 'node_modules/.bin/tsgo --noEmit -p tsconfig.test.json'
     toolchain: 'system'
     inputs:
       - 'src/**/*.ts'

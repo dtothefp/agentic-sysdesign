@@ -59,7 +59,10 @@ npm run dev
 curl -N -X POST localhost:8100/chat -H 'content-type: application/json' \
   -d '{"message":"start a demo run"}'
 
-npm run typecheck   # tsc over src plus test
+npm run format      # oxfmt format check (oxfmt --write . to fix)
+npm run lint        # oxlint
+npm run knip        # unused deps and exports
+npm run typecheck   # tsgo over src plus test
 npm test            # node:test via tsx, no network
 npm run build       # tsc into dist/, what Railway builds
 ```
@@ -92,7 +95,7 @@ Config-as-code is committed (`railway.json`), build with `npm ci && npm run buil
 ## Note on CI
 
 This service has its own workflow, `.github/workflows/agent-ts-ci.yml`, path-filtered to
-`services/agent-ts/**` so it only runs when the TypeScript changes. It does `npm ci`, then
-`npm run format` (Prettier check), `npm run typecheck`, `npm run build`, and `npm test`. The main
-repo CI stays Python-only (uv plus ruff plus pytest). Run the same four npm scripts locally before
-pushing.
+`services/agent-ts/**` so it only runs when the TypeScript changes. It does `npm ci`, then the
+house toolchain `npm run format` (oxfmt), `npm run lint` (oxlint), `npm run knip`, `npm run
+typecheck` (tsgo), then `npm run build` and `npm test`. The main repo CI stays Python-only (uv plus
+ruff plus pytest). Run the same scripts locally before pushing.

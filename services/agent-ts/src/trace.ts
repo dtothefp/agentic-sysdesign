@@ -13,16 +13,16 @@
 // local dev stays a plain call either way. That's the inert-until-keyed contract the whole stack
 // keeps: no key, no-op.
 
-import type Anthropic from "@anthropic-ai/sdk";
+import type Anthropic from "@anthropic-ai/sdk"
 
 export function traceable<A extends unknown[], R>(
   _name: string,
   _runType: "chain" | "tool" | "llm",
   fn: (...args: A) => R,
 ): (...args: A) => R {
-  return fn;
+  return fn
 }
 
 export function wrapAnthropic(client: Anthropic): Anthropic {
-  return client;
+  return client
 }
