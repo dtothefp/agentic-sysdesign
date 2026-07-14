@@ -786,6 +786,146 @@
         }
       }
     },
+    "/search": {
+      "get": {
+        "tags": [
+          "search"
+        ],
+        "summary": "Search",
+        "description": "Hybrid search over signal captions: Postgres full-text (lexical) + pgvector (semantic),\nfused with Reciprocal Rank Fusion. Each hit reports its fused `score` and which halves found\nit (`sources`).\n\nThe semantic half runs only when EMBEDDING_MODEL is set: the query is embedded with the same\nmodel the documents were, then matched by cosine distance. With no model, or if embedding the\nquery fails, `semantic` is false and results are lexical-only (still useful, exact matches\nrank fine). This is the same inert-until-keyed contract the rating layer uses, made visible\nin the response instead of hidden.",
+        "operationId": "search",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "free-text query (words, quoted phrases, -negation)",
+              "title": "Q"
+            },
+            "description": "free-text query (words, quoted phrases, -negation)"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/signal-clusters": {
+      "get": {
+        "tags": [
+          "search"
+        ],
+        "summary": "Signal Clusters",
+        "description": "The week's rated posts pre-grouped into emergent themes by embedding similarity, the same\nresult the digest agent's get_signal_clusters MCP tool returns (shared common.clusters, no\ndrift). Themes are computed on demand, not predefined: each call groups this window's rated +\nembedded posts by cosine proximity, biggest and strongest theme first.\n\n`clustered` is false when no embeddings back the window (embedded == 0), the inert-until-keyed\ncontract, in which case a caller should fall back to GET /ratings and group the flat list.",
+        "operationId": "signal_clusters",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 90,
+              "minimum": 1,
+              "description": "look-back window",
+              "default": 7,
+              "title": "Days"
+            },
+            "description": "look-back window"
+          },
+          {
+            "name": "min_relevance",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "default": 0.5,
+              "title": "Min Relevance"
+            }
+          },
+          {
+            "name": "max_themes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 15,
+              "title": "Max Themes"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignalClustersResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/digests": {
       "post": {
         "tags": [
@@ -1020,6 +1160,101 @@
   },
   "components": {
     "schemas": {
+      "ClusterMember": {
+        "properties": {
+          "handle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Handle"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "content_hash": {
+            "type": "string",
+            "title": "Content Hash"
+          },
+          "relevance": {
+            "type": "number",
+            "title": "Relevance"
+          }
+        },
+        "type": "object",
+        "required": [
+          "handle",
+          "url",
+          "content_hash",
+          "relevance"
+        ],
+        "title": "ClusterMember"
+      },
+      "ClusterRepresentative": {
+        "properties": {
+          "handle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Handle"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "content_hash": {
+            "type": "string",
+            "title": "Content Hash"
+          },
+          "relevance": {
+            "type": "number",
+            "title": "Relevance"
+          },
+          "caption": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caption"
+          }
+        },
+        "type": "object",
+        "required": [
+          "handle",
+          "url",
+          "content_hash",
+          "relevance"
+        ],
+        "title": "ClusterRepresentative"
+      },
       "DailyRollup": {
         "properties": {
           "influencer_id": {
@@ -1444,6 +1679,136 @@
         "type": "object",
         "title": "RunTrigger"
       },
+      "SearchHit": {
+        "properties": {
+          "content_hash": {
+            "type": "string",
+            "title": "Content Hash"
+          },
+          "handle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Handle"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "caption": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caption"
+          },
+          "captured_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Captured At"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "relevance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relevance"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "topics": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content_hash",
+          "handle",
+          "url",
+          "caption",
+          "captured_at",
+          "score",
+          "sources"
+        ],
+        "title": "SearchHit"
+      },
+      "SearchResponse": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "semantic": {
+            "type": "boolean",
+            "title": "Semantic"
+          },
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/SearchHit"
+            },
+            "type": "array",
+            "title": "Hits"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query",
+          "semantic",
+          "hits"
+        ],
+        "title": "SearchResponse"
+      },
       "Signal": {
         "properties": {
           "id": {
@@ -1490,6 +1855,52 @@
           "payload"
         ],
         "title": "Signal"
+      },
+      "SignalClustersResponse": {
+        "properties": {
+          "days": {
+            "type": "integer",
+            "title": "Days"
+          },
+          "min_relevance": {
+            "type": "number",
+            "title": "Min Relevance"
+          },
+          "rated_in_window": {
+            "type": "integer",
+            "title": "Rated In Window"
+          },
+          "embedded": {
+            "type": "integer",
+            "title": "Embedded"
+          },
+          "clustered": {
+            "type": "boolean",
+            "title": "Clustered"
+          },
+          "theme_count": {
+            "type": "integer",
+            "title": "Theme Count"
+          },
+          "themes": {
+            "items": {
+              "$ref": "#/components/schemas/SignalTheme"
+            },
+            "type": "array",
+            "title": "Themes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "days",
+          "min_relevance",
+          "rated_in_window",
+          "embedded",
+          "clustered",
+          "theme_count",
+          "themes"
+        ],
+        "title": "SignalClustersResponse"
       },
       "SignalIn": {
         "properties": {
@@ -1544,6 +1955,44 @@
           "content_hash"
         ],
         "title": "SignalInsertResult"
+      },
+      "SignalTheme": {
+        "properties": {
+          "theme_size": {
+            "type": "integer",
+            "title": "Theme Size"
+          },
+          "avg_relevance": {
+            "type": "number",
+            "title": "Avg Relevance"
+          },
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Topics"
+          },
+          "representative": {
+            "$ref": "#/components/schemas/ClusterRepresentative"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ClusterMember"
+            },
+            "type": "array",
+            "title": "Members"
+          }
+        },
+        "type": "object",
+        "required": [
+          "theme_size",
+          "avg_relevance",
+          "topics",
+          "representative",
+          "members"
+        ],
+        "title": "SignalTheme"
       },
       "Source": {
         "properties": {
@@ -1680,6 +2129,10 @@
     {
       "name": "ratings",
       "description": "Per-signal AI ratings, keyed on content_hash."
+    },
+    {
+      "name": "search",
+      "description": "Module 6: hybrid lexical + semantic search over signal content, fused with RRF."
     },
     {
       "name": "digests",

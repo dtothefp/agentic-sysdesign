@@ -25,6 +25,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 import psycopg
+from common.clusters import get_signal_clusters
 from common.db import DATABASE_URL
 from common.rating import resolve_model
 from common.search import embed_query, hybrid_search
@@ -60,15 +61,6 @@ from api.models import (
     Source,
     SourceIn,
 )
-<<<<<<< HEAD:services/api/api/main.py
-=======
-from common.clusters import get_signal_clusters
-from common.db import DATABASE_URL
-from common.rating import resolve_model
-from common.search import embed_query, hybrid_search
-from common.signals import insert_signal
-from worker.tasks import start_run
->>>>>>> a7460d3 (Module 6: cluster the digest's rated posts into emergent themes):backend/api/main.py
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
 

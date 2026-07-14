@@ -6,7 +6,6 @@ import os
 
 import psycopg
 import pytest
-
 from common.embedding import (
     EMBEDDING_DIM,
     default_embedding_model,

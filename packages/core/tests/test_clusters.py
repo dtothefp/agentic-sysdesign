@@ -7,7 +7,6 @@ import os
 
 import psycopg
 import pytest
-
 from common.clusters import cosine_distance, greedy_cluster
 from common.embedding import from_vector_literal
 
