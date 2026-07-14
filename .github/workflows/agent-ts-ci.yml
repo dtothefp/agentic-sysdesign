@@ -1,7 +1,8 @@
 # CI gate for the TypeScript chat agent (services/agent-ts), separate from the Python `ci`
 # workflow. Path-filtered so it only runs when the TS service changes, on PRs and on merges to
-# main. One job, so "did agent-ts CI pass" is one green check: Prettier format check, tsc
-# typecheck, tsc build, and the node:test loop suite. Node (npm ci), not bun.
+# main. One job, so "did agent-ts CI pass" is one green check: the house toolchain (oxfmt format
+# check, oxlint, knip, tsgo typecheck), then the tsc build and the node:test loop suite. Node
+# (npm ci), not bun.
 
 name: agent-ts
 
@@ -21,7 +22,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  format-typecheck-build-test:
+  format-lint-typecheck-build-test:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -39,10 +40,16 @@ jobs:
       - name: Install (npm ci, frozen lockfile)
         run: npm ci
 
-      - name: Format check (Prettier)
+      - name: Format check (oxfmt)
         run: npm run format
 
-      - name: Typecheck (tsc)
+      - name: Lint (oxlint)
+        run: npm run lint
+
+      - name: Unused deps and exports (knip)
+        run: npm run knip
+
+      - name: Typecheck (tsgo)
         run: npm run typecheck
 
       - name: Build (tsc into dist/)
