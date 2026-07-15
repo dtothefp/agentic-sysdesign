@@ -19,9 +19,6 @@ A playground and a skeleton for building agentic applications with fun tools.
 
 [Apify](https://apify.com) · [Celery](https://docs.celeryq.dev) · [FastAPI](https://fastapi.tiangolo.com) · [pgvector](https://github.com/pgvector/pgvector) · [Supabase](https://supabase.com) · [Railway](https://railway.com) · [moon](https://moonrepo.dev) · [Anthropic Managed Agents](https://docs.claude.com/en/docs/agents-and-tools/managed-agents)
 
-Live in production for a few dollars a month. Fork it and steal the parts you
-like. Issues and PRs welcome.
-
 ## The pipeline
 
 ```
