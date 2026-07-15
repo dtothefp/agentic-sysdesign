@@ -15,17 +15,12 @@
    scrape ──▶ fan out ──▶ rate ──▶ embed ──▶ search ──▶ chat
 ```
 
-A working demo of an agentic data pipeline. One real app, live in production.
-Instagram posts get scraped and fanned out through a Celery worker queue. An LLM
-rates each post. Embeddings land in pgvector and power hybrid semantic search.
-Chat agents written twice (Python and TypeScript) reason over the results. A
-scheduled [Anthropic Managed Agent](https://docs.claude.com/en/docs/agents-and-tools/managed-agents)
-writes a weekly digest. The whole thing runs on [Railway](https://railway.com) and
-[Supabase](https://supabase.com) for a few dollars a month.
+A playground and a skeleton for building agentic applications with fun tools.
 
-Think of it like the demos folder of a framework repo. Every piece is small enough
-to read in a sitting. It's all deployed and running so you're not taking my word
-for it. Fork it and steal the parts you like. Issues and PRs welcome.
+[Apify](https://apify.com) · [Celery](https://docs.celeryq.dev) · [FastAPI](https://fastapi.tiangolo.com) · [pgvector](https://github.com/pgvector/pgvector) · [Supabase](https://supabase.com) · [Railway](https://railway.com) · [moon](https://moonrepo.dev) · [Anthropic Managed Agents](https://docs.claude.com/en/docs/agents-and-tools/managed-agents)
+
+Live in production for a few dollars a month. Fork it and steal the parts you
+like. Issues and PRs welcome.
 
 ## The pipeline
 
@@ -50,11 +45,6 @@ for it. Fork it and steal the parts you like. Issues and PRs welcome.
         └──▶ digest bot    scheduled Anthropic Managed Agent,
                            clusters the week's themes, writes digests
 ```
-
-Products in the diagram get linked once here. [Apify](https://apify.com) does the
-scraping. [Celery](https://docs.celeryq.dev) runs the queue.
-[pgvector](https://github.com/pgvector/pgvector) holds the embeddings.
-[FastAPI](https://fastapi.tiangolo.com) is the surface.
 
 ## The demo tour
 
