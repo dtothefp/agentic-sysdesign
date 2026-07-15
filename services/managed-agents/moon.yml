@@ -5,9 +5,9 @@
 # shared resource ids from resources.json. Parameterized via env vars, same shape as the
 # old make targets:
 #
-#   TIER=local RUN=1 moon run agents:deploy    # BRANCH defaults to the current branch
-#   TIER=local moon run agents:run
-#   moon run agents:list
+#   TIER=local RUN=1 moon run managed-agents:deploy    # BRANCH defaults to the current branch
+#   TIER=local moon run managed-agents:run
+#   moon run managed-agents:list
 $schema: 'https://moonrepo.dev/schemas/project.json'
 
 stack: 'backend'

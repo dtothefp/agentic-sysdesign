@@ -1191,7 +1191,7 @@ wheels = [
 [[package]]
 name = "sysdesign-agent"
 version = "0.1.0"
-source = { editable = "packages/agent" }
+source = { editable = "services/agent" }
 dependencies = [
     { name = "anthropic" },
     { name = "fastapi" },
@@ -1216,7 +1216,7 @@ requires-dist = [
 [[package]]
 name = "sysdesign-agents"
 version = "0.1.0"
-source = { virtual = "packages/agents" }
+source = { virtual = "services/managed-agents" }
 dependencies = [
     { name = "pyyaml" },
 ]

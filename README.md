@@ -1,185 +1,179 @@
-# sysdesign
+# agentic-sysdesign
 
-A system-design build guide, built as one real app: a scaled-down influencer-intelligence
-pipeline (Defrag's creator watchlist) that grows module by module. Each module is one
-interview competency, and building
-it is the prep. This is throwaway learning code, not a product. The point is to have run
-it, broken it, and read the query plans, so a backend round has nothing in it you haven't
-already touched with your hands.
+```
+        *   .          ✦                 .   ·
+   ·         ◐  moon runs the tasks          *
+      ✦   .        ·          .    ✦
+                                                  ·
+   scrape ──▶ fan out ──▶ rate ──▶ embed ──▶ search ──▶ chat
+```
 
-## Module ladder
+A working demo of an agentic data pipeline, built as one real app that's live in
+production. Instagram posts get scraped, fanned out through a Celery worker queue,
+rated by an LLM, embedded into pgvector, served through hybrid semantic search, and
+reasoned over by chat agents written twice (Python and TypeScript) plus a scheduled
+[Anthropic Managed Agent](https://docs.claude.com/en/docs/agents-and-tools/managed-agents)
+that writes a weekly digest. The whole thing deploys on
+[Railway](https://railway.com) and [Supabase](https://supabase.com) for a few dollars
+a month.
 
-The five modules are cumulative layers of one app, not separate apps. They live in one repo
-that accumulates; each finished module gets a git tag (`module-1`, `module-2`, ...) so any
-milestone is one `git checkout` away.
+Think of it like the demos folder of a framework repo. Every piece is small enough to
+read in a sitting, real enough to run, and deployed enough to prove it works. Fork it,
+break it, steal the parts you like. Issues and PRs welcome.
 
-1. **Data model** (current). Partitioned Postgres schema, per-partition indexes, a
-   read-path materialized view, EXPLAIN drills, and a FastAPI surface over it.
-2. **Celery fan-out.** Background scraping jobs writing to a durable `runs` table, live
-   progress in Redis, a Next.js frontend polling it.
-3. **AWS-native.** Deploy it for real.
-4. **pgvector.** Semantic search over the signals.
-5. **LLM + graph.** Summarize signals into events and digests, build relationships.
+## The pipeline
+
+```
+  Instagram posts
+        │  Apify scrape, driven by an in-repo Claude Code skill
+        ▼
+  FastAPI ──── POST /runs ────▶ Celery chord fan-out
+        │                       one task per creator, progress
+        │                       streamed to the browser over SSE
+        ▼                            │
+  Postgres on Supabase               ▼
+   partitioned tables         rate + embed stages
+   full-text GIN index        one decoupled Celery job per new
+   pgvector HNSW index        signal, LLM behind one adapter
+        │
+        ▼
+  hybrid search (lexical + semantic, fused with RRF)
+        │
+        ├──▶ chat agents   ReAct loops over the REST API,
+        │                  Python and TypeScript side by side
+        └──▶ digest bot    scheduled Anthropic Managed Agent,
+                           clusters the week's themes, writes digests
+```
+
+Products in the diagram, linked once. [Apify](https://apify.com) does the scraping,
+[Celery](https://docs.celeryq.dev) runs the queue, [pgvector](https://github.com/pgvector/pgvector)
+holds the embeddings, [FastAPI](https://fastapi.tiangolo.com) is the surface.
+
+## The demo tour
+
+The app grew in modules, and each finished module has a git tag (`module-1`,
+`module-2`, ...) so any milestone is one `git checkout` away.
+
+| Module | What it demos |
+|---|---|
+| 1. Data model | Partitioned Postgres, per-partition indexes, a materialized view, EXPLAIN drills you can run yourself |
+| 2. Celery fan-out | `POST /runs` fans out a chord (one task per creator), progress streams over Server-Sent Events, matview refreshes on fan-in |
+| 3. Deploy | Railway for api + worker + Redis + agent, Supabase Postgres with pgvector. Migrations run as a pre-deploy step so code never ships ahead of schema |
+| 4. LLM rating layer | Each new signal gets one structured-output rating job. Provider-agnostic adapter, so local dev rates through Ollama for free and prod rents a hosted model |
+| 5. Managed Agents | A scheduled Anthropic Managed Agent pulls the week's rated signals through the deployed API over MCP, compares against last week via a Memory Store, writes digests |
+| 6. Hybrid search | Postgres full-text + pgvector HNSW run in parallel, fused with Reciprocal Rank Fusion. Degrades to lexical-only with no embedding key, and tells you so |
+| 7. Chat agents | The same ReAct loop written twice. Python (sync generator + thread bridge) vs TypeScript (native async generator), same wire contract, so you can read the concurrency models against each other |
+
+Deeper write-ups live in `docs/` (one per module, with the design reasoning and
+ASCII diagrams).
+
+## The stack, and why it's fun
+
+- **[moon](https://moonrepo.dev)** is the one task runner. A standalone Rust binary,
+  no node required, project-scoped tasks (`moon run api:dev`, `moon run :test`).
+  If you've fought Lerna or a wall of Makefiles, moon is the palette cleanser.
+- **[uv](https://docs.astral.sh/uv/) workspace.** One `uv.lock` at the root covers
+  every Python package. `uv sync --all-packages` and you're done.
+- **Railway + Supabase instead of a cloud giant.** Four Railway services and a
+  Supabase Postgres run this whole thing for pocket change. Config-as-code
+  (`railway.json` per service), preview environments per PR, pgvector one
+  `CREATE EXTENSION` away.
+- **Dev containers, three ways.** A `.devcontainer/` with its own sibling Postgres
+  (works in Cursor and VS Code, never collides with your host's 5432), a
+  `.cursor/environment.json` for Cursor's cloud agents, and plain host dev with
+  Docker compose. Pick whichever, the moon tasks are identical in all three.
+- **Inert until keyed.** Every paid layer (rating, embeddings) switches off cleanly
+  when its env var is unset, so the demo runs end to end with zero API keys.
+  `{"mode": "demo"}` runs generate synthetic signals, no scraping spend either.
+- **Own the interface, rent the model.** The LLM adapters speak the
+  OpenAI-compatible wire shape over raw urllib, so the same code rates through
+  local [Ollama](https://ollama.com) in the container and a hosted model in prod.
+  Which model rates a run is request data, not deployment config.
 
 ## Layout
 
-A moon + uv-workspace monorepo. One `uv.lock` at the root covers every member, and moon is
-the ONE task runner (no Makefile). Tasks live in the project that owns them: the db
-lifecycle in `packages/core` (it owns the migrations), agent hand-cranks in
-`packages/agents`, dev servers in `services/*`, and workspace-level lifecycle (compose
-up/down, setup, format) in a root-level moon project (`moon.yml` at the repo root).
-
 ```
-moon.yml          root moon project: workspace lifecycle tasks (root:up, root:setup, ...)
-.moon/            moon workspace config (also the .env loader's repo-root marker)
-apps/chat-web/    React chat agent UI (scaffold, Module 7)
-services/api/     FastAPI surface (sysdesign-api) + its railway.json + tests
-services/worker/  Celery worker + beat (sysdesign-worker) + its railway.json
-packages/core/    shared common/ + db/ migrations + drills + tests (sysdesign-core)
-packages/task-contract/  task names + send-only Celery client (decouples api from worker)
-packages/agents/  Module 5 Managed Agents YAML + agentctl.py
-infra/            Railway env-var sync + preview-env scripts
-.claude/skills/   in-repo skills (e.g. scrape-signals)
-.devcontainer/    reproducible container with its own sibling Postgres
+moon.yml                 root moon project, workspace lifecycle (root:setup, root:up, ...)
+.moon/                   moon workspace config, pins the moon version
+apps/chat-web/           React chat UI (scaffold)
+services/api/            FastAPI surface + railway.json + tests
+services/worker/         Celery worker + beat + railway.json
+services/agent/          chat agent, Python. ReAct loop, CLI + SSE server, deployed on Railway
+services/agent-ts/       chat agent, TypeScript. Same contract, native async generators
+services/managed-agents/ Anthropic Managed Agents config (agent.yaml) + agentctl.py
+packages/core/           shared code, db migrations, EXPLAIN drills
+packages/task-contract/  task names + send-only Celery client (api never imports worker)
+infra/                   Railway env-var sync + per-PR preview environments
+.claude/skills/          in-repo Claude Code skills (the scraper is a skill, not a cron)
+.devcontainer/           reproducible container with its own Postgres
 ```
 
-Run everything from the repo root. moon is a standalone Rust binary (`brew install moon`),
-and `uv sync --all-packages` installs the whole Python workspace. No node or pnpm anywhere.
-The moon version is pinned in `.moon/workspace.yml`, and the containers fetch a matching
-release binary directly.
+Python everywhere except `services/agent-ts/`, which is a deliberate TypeScript
+island (Node 22, [oxfmt](https://oxc.rs) + oxlint + knip + tsgo toolchain) so the
+two agent runtimes can be compared honestly.
 
-## Quick start (local)
+## Quick start
 
-Needs Docker, `uv`, `psql`, `dbmate` (`brew install dbmate`), and `moon` (`brew install moon`)
-on the host. The dev container has all five preinstalled, so in Cursor you skip straight to
-`moon run core:db-init`.
+Needs Docker, [uv](https://docs.astral.sh/uv/), `psql`, [dbmate](https://github.com/amacneil/dbmate),
+and [moon](https://moonrepo.dev) (`brew install moon dbmate`). Or open the dev
+container and skip the installs.
 
 ```bash
 uv sync --all-packages
-moon run root:setup    # db up + migrate + seed, one shot
-moon run core:drills   # run the six EXPLAIN drills (whole file, smoke test)
-# or open an interactive shell to study one plan at a time:
-psql "postgresql://lab:lab@localhost:5432/sysdesign"
+moon run root:setup      # db up + migrate + seed, one shot (host)
+moon run core:db-init    # same, inside the dev container (db is a sibling there)
+
+moon run api:dev         # FastAPI at :8000, Swagger at /docs
+moon run worker:dev      # Celery worker (needs Redis, compose provides it)
 ```
 
-`moon run root:down` drops the volume for a clean slate. `moon run root:reset` is down
-then setup. `moon run :lint` and `moon run :test` sweep every project's lint/test.
-
-## Migrations (dbmate)
-
-A migration is just an ordered SQL file with a `migrate:up` block (apply) and a
-`migrate:down` block (undo). dbmate records which files have run in a `schema_migrations`
-table, so it never runs one twice. No ORM, no codegen.
+The fastest end-to-end demo needs no keys at all. It exercises the chord fan-out,
+the SSE stream, and the matview refresh:
 
 ```bash
-moon run core:migrate    # apply every pending migration in order
-moon run core:status     # show which have run, which are pending
-moon run core:rollback   # undo the most recent migration (its migrate:down)
-NAME=add_events_index moon run core:new   # scaffold the next timestamped migration
+curl -X POST localhost:8000/runs -H 'content-type: application/json' \
+  -d '{"mode":"demo","limit":5}'
+curl -N localhost:8000/runs/<run_id>/stream    # watch the fan-out live
 ```
 
-`packages/core/db/migrations/20260708000001_initial_schema.sql` creates the tables (`raw_signals`
-RANGE partitioned by `captured_at`, the partition key inside every unique constraint, and a
-durable `runs` job-of-record table that Module 2 writes to on state transitions while
-pushing high-frequency progress to a Redis cache). `20260708000002_monthly_partitions.sql`
-adds the monthly child partitions and an idempotent `create_month_partition(date)`
-maintenance function (the production answer is `pg_partman`).
-`20260708000003_influencer_signals_schema.sql` reframes the domain from generic competitors
-to Defrag's influencer watchlist: it renames `competitors` to `influencers`, renames
-`competitor_id` to `influencer_id` everywhere (one ALTER cascades across all raw_signals
-partitions), adds `instagram_handle` and the `last_scraped_at` scrape watermark, and rebuilds
-the rollup matview. All renames, no data dropped, so you can read exactly what moved.
-`20260708000004_older_partitions.sql` backfills partition coverage for Jan through Apr 2026
-(the initial partitions start at 2026-05-01), so real posts from earlier in the year have a
-child partition to land in. These files are the single source of truth for the schema shape.
-
-A full write-up of Module 1 (what's in it, why each choice, and a phased test walkthrough
-covering the migrations, the API, the scrape skill, and the EXPLAIN drills) lives in
-[`docs/module-1.md`](docs/module-1.md).
-
-## API
-
-A thin FastAPI surface over the schema lives in `services/api/`. Run it from the repo root:
+Talk to the chat agent (needs `ANTHROPIC_API_KEY` in the repo-root `.env`):
 
 ```bash
-moon run api:dev    # uvicorn at http://localhost:8000, interactive docs at /docs
+uv run --package sysdesign-agent python -m agent "what creators do we track?"
+cd services/agent-ts && npm ci && npm run chat -- "same question, different runtime"
 ```
 
-Endpoints: `/influencers` (`POST` a single creator or `POST /influencers/bulk` for the whole
-watchlist, both upsert on `instagram_handle`), `/sources`, `/signals`, `/rollup`. Two things
-it's built to show. `POST /signals` is the idempotent `ON CONFLICT DO NOTHING` upsert with
-`content_hash` derived server-side, so re-POSTing the identical signal is a no-op. `GET /signals`
-requires a `from`/`to` window, so every read carries the partition key and prunes to the
-relevant month(s) instead of fanning across all partitions. `PATCH /influencers/{id}` advances
-the `last_scraped_at` watermark the incremental scraper reads.
+`moon run :lint` and `moon run :test` sweep every project. Tests marked
+`integration` auto-skip when Postgres is down, so the suite is green even cold.
 
-To fill the database with real (not synthetic) data, use the in-repo `scrape-signals` skill
-(`.claude/skills/scrape-signals/`), which is how Claude Code drives the database. It's a loop
-entirely over the API: `POST /influencers/bulk` to seed the watchlist, `GET /influencers` to
-read them back, scrape each one's recent Instagram posts (Apify REST, all in parallel,
-incremental off each watermark), then `POST /signals` for each post. Every write takes the same
-idempotent path the app uses. Needs `APIFY_API_KEY` in the repo-root `.env` (gitignored). There's no
-scrape task; the scrape is a skill Claude Code runs, not a build target.
+## Migrations
 
-### OpenAPI
+Plain SQL files via dbmate, no ORM. Each has a `migrate:up` and a `migrate:down`,
+and they run automatically as Railway's pre-deploy step so a deploy can't ship
+code ahead of its schema.
 
-FastAPI generates the OpenAPI spec automatically from the Pydantic models and route
-signatures. No extra library. While `moon run api:dev` is running, the spec is machine-readable at
-`/openapi.json`, with Swagger UI at `/docs` and ReDoc at `/redoc`. `operationId`s are the
-handler names (`list_signals`, `create_signal`) so a generated client reads cleanly.
+```bash
+moon run core:migrate     # apply pending
+moon run core:status      # what's run, what's pending
+moon run core:rollback    # undo the latest
+NAME=add_thing moon run core:new   # scaffold the next one
+```
 
-`moon run api:openapi` writes the spec to `services/api/openapi.json` without a running db or server (it
-only introspects the routes). That file is the codegen input for the Module 2 Next.js
-frontend, which points a typed-client generator (openapi-typescript / orval) at it to get a
-fully typed API client. Regenerate it whenever the API surface changes.
+The raw SQL is the point. Partition pruning, `ON CONFLICT` idempotency, and index
+choices stay visible instead of hiding behind an ORM. Six
+`EXPLAIN (ANALYZE, BUFFERS)` drills in `packages/core/drills/` walk the query
+plans one at a time.
 
-## Drills
+## The one idempotency sentence
 
-`packages/core/drills/explain-drills.sql` has six `EXPLAIN (ANALYZE, BUFFERS)` drills covering
-pruning, index vs seq scan, the no-partition-key anti-pattern, covering index-only scans,
-the matview read/write split, and concurrent refresh. Run them one block at a time in an
-interactive `psql` session to read each plan on its own; `moon run core:drills` fires all
-six at once and is only useful as a smoke test.
+At-least-once delivery is assumed everywhere. Every write is an idempotent upsert
+keyed on `(influencer_id, content_hash, captured_at)`, so reprocessing the same
+item twice is a no-op. That one sentence answers most "what if it runs twice"
+questions in the whole pipeline.
 
-## Dev environments
+## Contributing
 
-- `.devcontainer/`. Local reproducible container (VS Code or Cursor "Reopen in Container").
-  Self-contained: a Python workspace plus its own Postgres, defined in
-  `.devcontainer/compose.yml`. The workspace reaches the db over the internal network at
-  `db:5432`, so the container's Postgres does NOT publish a host port. That's deliberate. It
-  means the dev container never collides with a host-run `moon run root:up` on 5432, and you
-  can run both at once. The tradeoff is the container's db is a separate volume, so it starts
-  empty. Seed it once from a container terminal:
-
-  ```bash
-  moon run core:db-init   # schema + partitions + full seed, no `docker compose up` (db is a sibling here)
-  moon run core:drills
-  ```
-
-  Use `core:db-init` inside the container, not `root:setup`. `setup` tries to
-  `docker compose up` a db, which is the host workflow; inside the container the db is
-  already running.
-
-  `db-init` runs the *full* seed (the watchlist plus 4000 synthetic signals, so the drills have
-  volume). If you just want a clean database with only the influencers and none of the synthetic
-  rows, run `moon run core:db-fresh` instead: it drops the db, re-applies every migration from
-  empty, and seeds only the watchlist. Stop `moon run api:dev` first, since an open connection
-  blocks the drop. `moon run core:seed-influencers` seeds just the watchlist without touching
-  the schema.
-- `.cursor/environment.json`. The config Cursor Cloud Agents read to boot their own
-  environment. Installs `uv` and the Postgres client, syncs the workspace (`uv sync --all-packages`), and brings
-  up the db. Cloud agents run in a Docker container on a VM. If docker-in-docker is not
-  available in the agent environment, swap the `start` step for a Dockerfile-provisioned
-  Postgres or an external database URL passed as a scoped secret.
-
-### If the dev container fails with "port is already allocated"
-
-Something on the host already holds `5432` (usually a `moon run root:setup` / `root:up` you
-ran earlier). The current dev container no longer publishes 5432, so a fresh "Rebuild
-Container" resolves it. If you're on an older checkout that still published the port, either
-stop the host stack first (`moon run root:down`) or pull this fix.
-
-## Git workflow
-
-App tier. Feature branch plus PR, never commit to `main` directly. Tag each completed module
-on `main`.
+This is a demo repo, so the bar is "does it teach something." Small focused PRs
+that sharpen a module, add a drill, or port a pattern to another runtime are all
+fair game. Feature branches + PRs, never straight to `main`, and each completed
+module gets a tag.

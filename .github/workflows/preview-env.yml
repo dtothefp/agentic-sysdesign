@@ -69,7 +69,7 @@ jobs:
           PREVIEW_URL: ${{ steps.up.outputs.PREVIEW_URL }}
           GIT_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          python packages/agents/agentctl.py deploy --tier preview \
+          python services/managed-agents/agentctl.py deploy --tier preview \
             --pr "$PR_NUMBER" --base-url "$PREVIEW_URL" --sha "$GIT_SHA"
 
   down:
@@ -91,4 +91,4 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: python packages/agents/agentctl.py teardown --tier preview --pr "$PR_NUMBER"
+        run: python services/managed-agents/agentctl.py teardown --tier preview --pr "$PR_NUMBER"

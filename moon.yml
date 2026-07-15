@@ -1,7 +1,7 @@
 # moon root project: workspace-level lifecycle tasks that belong to no single member.
 # moon replaced the Makefile outright (it's the one task runner, no make wrapping):
 # db lifecycle lives in packages/core (it owns the migrations), agent hand-cranks in
-# packages/agents, per-service dev tasks in services/*. This file keeps only what is
+# services/managed-agents, per-service dev tasks in services/*. This file keeps only what is
 # genuinely workspace-scoped: the compose stack, setup/reset, and lint/format for the
 # loose Python that lives outside every project (infra/, .claude/skills/).
 #
