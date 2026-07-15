@@ -4,8 +4,8 @@
                 *        .           ✦                 .    ·        *
       ·                 _..._                                   .
             ✦         .::::: `.                                       ✦
-                     :::::::::  \       m o o n   r u n s
-     *               ::::::::::  |        t h e   t a s k s
+                     :::::::::  \       T O   T H E   M O O N !
+     *               ::::::::::  |
          .           `:::::::::  /                           ·
               ·        `::::: _.'              *        .
        ✦                 `"'          ✦
@@ -15,19 +15,17 @@
    scrape ──▶ fan out ──▶ rate ──▶ embed ──▶ search ──▶ chat
 ```
 
-A working demo of an agentic data pipeline, built as one real app that's live in
-production. Instagram posts get scraped, fanned out through a Celery worker queue,
-rated by an LLM, embedded into pgvector, served through hybrid semantic search, and
-reasoned over by chat agents written twice (Python and TypeScript) plus a scheduled
-[Anthropic Managed Agent](https://docs.claude.com/en/docs/agents-and-tools/managed-agents)
-that writes a weekly digest. The whole thing deploys on
-[Railway](https://railway.com) and [Supabase](https://supabase.com) for a few dollars
-a month.
+A working demo of an agentic data pipeline. One real app, live in production.
+Instagram posts get scraped and fanned out through a Celery worker queue. An LLM
+rates each post. Embeddings land in pgvector and power hybrid semantic search.
+Chat agents written twice (Python and TypeScript) reason over the results. A
+scheduled [Anthropic Managed Agent](https://docs.claude.com/en/docs/agents-and-tools/managed-agents)
+writes a weekly digest. The whole thing runs on [Railway](https://railway.com) and
+[Supabase](https://supabase.com) for a few dollars a month.
 
-Think of it like the demos folder of a framework repo. Every piece is small enough to
-read in a sitting, and because the whole thing is actually deployed and running, you're
-not taking my word for any of it. Fork it and steal the parts you like, and if you
-break something interesting along the way, issues and PRs are welcome.
+Think of it like the demos folder of a framework repo. Every piece is small enough
+to read in a sitting. It's all deployed and running so you're not taking my word
+for it. Fork it and steal the parts you like. Issues and PRs welcome.
 
 ## The pipeline
 
@@ -53,53 +51,52 @@ break something interesting along the way, issues and PRs are welcome.
                            clusters the week's themes, writes digests
 ```
 
-Every product in the diagram gets linked once here. [Apify](https://apify.com) does
-the scraping and [Celery](https://docs.celeryq.dev) runs the queue, while
-[pgvector](https://github.com/pgvector/pgvector) holds the embeddings and
-[FastAPI](https://fastapi.tiangolo.com) is the surface it all comes out of.
+Products in the diagram get linked once here. [Apify](https://apify.com) does the
+scraping. [Celery](https://docs.celeryq.dev) runs the queue.
+[pgvector](https://github.com/pgvector/pgvector) holds the embeddings.
+[FastAPI](https://fastapi.tiangolo.com) is the surface.
 
 ## The demo tour
 
-The app grew in modules, and each finished module has a git tag (`module-1`,
+The app grew in modules. Each finished module has a git tag (`module-1`,
 `module-2`, ...) so any milestone is one `git checkout` away.
 
 | Module | What it demos |
 |---|---|
-| 1. Data model | Partitioned Postgres with per-partition indexes, a materialized view, and EXPLAIN drills you can run yourself |
-| 2. Celery fan-out | `POST /runs` fans out a chord (one task per creator) while progress streams over Server-Sent Events, and the matview refreshes on fan-in |
-| 3. Deploy | Railway for api + worker + Redis + agent, with Supabase Postgres providing pgvector. Migrations run as a pre-deploy step so code never ships ahead of schema |
-| 4. LLM rating layer | Each new signal gets one structured-output rating job through a provider-agnostic adapter, so local dev rates through Ollama for free and prod rents a hosted model |
-| 5. Managed Agents | A scheduled Anthropic Managed Agent pulls the week's rated signals through the deployed API over MCP, compares them against last week via a Memory Store, and writes digests |
-| 6. Hybrid search | Postgres full-text + pgvector HNSW run in parallel and get fused with Reciprocal Rank Fusion. With no embedding key it degrades to lexical-only and says so |
-| 7. Chat agents | The same ReAct loop written twice, Python (sync generator + thread bridge) vs TypeScript (native async generator) on the same wire contract, so you can read the two concurrency models against each other |
+| 1. Data model | Partitioned Postgres with per-partition indexes. A materialized view. EXPLAIN drills you can run yourself |
+| 2. Celery fan-out | `POST /runs` fans out a chord (one task per creator). Progress streams over Server-Sent Events. The matview refreshes on fan-in |
+| 3. Deploy | Railway for api + worker + Redis + agent. Supabase Postgres with pgvector. Migrations run as a pre-deploy step so code never ships ahead of schema |
+| 4. LLM rating layer | One structured-output rating job per new signal through a provider-agnostic adapter. Local dev rates through Ollama for free. Prod rents a hosted model |
+| 5. Managed Agents | A scheduled Anthropic Managed Agent pulls the week's rated signals through the deployed API over MCP. Compares against last week via a Memory Store. Writes digests |
+| 6. Hybrid search | Postgres full-text + pgvector HNSW run in parallel. Fused with Reciprocal Rank Fusion. No embedding key means lexical-only and it says so |
+| 7. Chat agents | The same ReAct loop written twice. Python is a sync generator + thread bridge. TypeScript is a native async generator. Same wire contract so you can read the two concurrency models against each other |
 
-Deeper write-ups live in `docs/` (one per module, with the design reasoning and
-ASCII diagrams).
+Deeper write-ups live in `docs/`. One per module with the design reasoning and
+ASCII diagrams.
 
-## The stack, and why it's fun
+## The stack and why it's fun
 
-- **[moon](https://moonrepo.dev)** is the one task runner, a standalone Rust binary
-  with no node required and project-scoped tasks (`moon run api:dev`, `moon run :test`).
-  If you've fought Lerna or a wall of Makefiles, moon is the palate cleanser.
+- **[moon](https://moonrepo.dev)** is the one task runner. A standalone Rust binary.
+  No node. Project-scoped tasks (`moon run api:dev`, `moon run :test`). If you've
+  fought Lerna or a wall of Makefiles moon is the palate cleanser.
 - **[uv](https://docs.astral.sh/uv/) workspace.** One `uv.lock` at the root covers
-  every Python package, so `uv sync --all-packages` and you're done.
+  every Python package. `uv sync --all-packages` and you're done.
 - **Railway + Supabase instead of a cloud giant.** Four Railway services and a
   Supabase Postgres run this whole thing for pocket change. Config lives as code
-  (`railway.json` per service), every PR gets its own preview environment, and
-  pgvector is one `CREATE EXTENSION` away.
-- **Dev containers, three ways.** A `.devcontainer/` with its own sibling Postgres
-  (works in Cursor and VS Code and never collides with your host's 5432), a
-  `.cursor/environment.json` for Cursor's cloud agents, and plain host dev with
-  Docker compose. Pick whichever you like, since the moon tasks are identical in
-  all three.
+  (`railway.json` per service). Every PR gets its own preview environment. pgvector
+  is one `CREATE EXTENSION` away.
+- **Dev containers three ways.** A `.devcontainer/` with its own sibling Postgres
+  (works in Cursor and VS Code and never collides with your host's 5432). A
+  `.cursor/environment.json` for Cursor's cloud agents. Plain host dev with Docker
+  compose. Pick whichever. The moon tasks are identical in all three.
 - **Inert until keyed.** Every paid layer (rating, embeddings) switches off cleanly
-  when its env var is unset, so the demo runs end to end with zero API keys.
-  `{"mode": "demo"}` runs generate synthetic signals, so there's no scraping spend
+  when its env var is unset. The demo runs end to end with zero API keys.
+  `{"mode": "demo"}` runs generate synthetic signals so there's no scraping spend
   either.
 - **Own the interface, rent the model.** The LLM adapters speak the
-  OpenAI-compatible wire shape over raw urllib, so the same code rates through
-  local [Ollama](https://ollama.com) in the container and a hosted model in prod,
-  and which model rates a given run is request data rather than deployment config.
+  OpenAI-compatible wire shape over raw urllib. The same code rates through local
+  [Ollama](https://ollama.com) in the container and a hosted model in prod. Which
+  model rates a run is request data not deployment config.
 
 ## Layout
 
@@ -119,15 +116,15 @@ infra/                   Railway env-var sync + per-PR preview environments
 .devcontainer/           reproducible container with its own Postgres
 ```
 
-Python everywhere except `services/agent-ts/`, which is a deliberate TypeScript
+Python everywhere except `services/agent-ts/`. That one is a deliberate TypeScript
 island (Node 22, [oxfmt](https://oxc.rs) + oxlint + knip + tsgo toolchain) so the
 two agent runtimes can be compared honestly.
 
 ## Quick start
 
-It needs Docker, [uv](https://docs.astral.sh/uv/), `psql`, [dbmate](https://github.com/amacneil/dbmate),
-and [moon](https://moonrepo.dev) (`brew install moon dbmate`), or you can open the
-dev container and skip the installs entirely.
+Needs Docker, [uv](https://docs.astral.sh/uv/), `psql`, [dbmate](https://github.com/amacneil/dbmate),
+and [moon](https://moonrepo.dev) (`brew install moon dbmate`). Or open the dev
+container and skip the installs.
 
 ```bash
 uv sync --all-packages
@@ -138,8 +135,8 @@ moon run api:dev         # FastAPI at :8000, Swagger at /docs
 moon run worker:dev      # Celery worker (needs Redis, compose provides it)
 ```
 
-The fastest end-to-end demo needs no keys at all, and it exercises the chord
-fan-out, the SSE stream, and the matview refresh.
+The fastest end-to-end demo needs no keys at all. It exercises the chord fan-out,
+the SSE stream, and the matview refresh.
 
 ```bash
 curl -X POST localhost:8000/runs -H 'content-type: application/json' \
@@ -147,7 +144,7 @@ curl -X POST localhost:8000/runs -H 'content-type: application/json' \
 curl -N localhost:8000/runs/<run_id>/stream    # watch the fan-out live
 ```
 
-To talk to the chat agent you'll need `ANTHROPIC_API_KEY` in the repo-root `.env`.
+Talking to the chat agent needs `ANTHROPIC_API_KEY` in the repo-root `.env`.
 
 ```bash
 uv run --package sysdesign-agent python -m agent "what creators do we track?"
@@ -155,13 +152,13 @@ cd services/agent-ts && npm ci && npm run chat -- "same question, different runt
 ```
 
 `moon run :lint` and `moon run :test` sweep every project. Tests marked
-`integration` auto-skip when Postgres is down, so the suite is green even cold.
+`integration` auto-skip when Postgres is down. The suite is green even cold.
 
 ## Migrations
 
-Migrations are plain SQL files via dbmate, with no ORM in the way. Each one has a
-`migrate:up` and a `migrate:down`, and they run automatically as Railway's
-pre-deploy step so a deploy can't ship code ahead of its schema.
+Plain SQL files via dbmate. No ORM. Each one has a `migrate:up` and a
+`migrate:down`. They run automatically as Railway's pre-deploy step so a deploy
+can't ship code ahead of its schema.
 
 ```bash
 moon run core:migrate     # apply pending
@@ -170,21 +167,21 @@ moon run core:rollback    # undo the latest
 NAME=add_thing moon run core:new   # scaffold the next one
 ```
 
-The raw SQL is the point, because partition pruning, `ON CONFLICT` idempotency, and
-index choices stay visible instead of hiding behind an ORM. Six
+The raw SQL is the point. Partition pruning, `ON CONFLICT` idempotency, and index
+choices stay visible instead of hiding behind an ORM. Six
 `EXPLAIN (ANALYZE, BUFFERS)` drills in `packages/core/drills/` walk the query
 plans one at a time.
 
 ## The one idempotency sentence
 
-At-least-once delivery is assumed everywhere, so every write is an idempotent
-upsert keyed on `(influencer_id, content_hash, captured_at)` and reprocessing the
-same item twice is a no-op. That one sentence answers most of the "what if it runs
-twice" questions in the whole pipeline.
+At-least-once delivery is assumed everywhere. Every write is an idempotent upsert
+keyed on `(influencer_id, content_hash, captured_at)`. Reprocessing the same item
+twice is a no-op. That answers most of the "what if it runs twice" questions in
+the whole pipeline.
 
 ## Contributing
 
-This is a demo repo, so the bar is "does it teach something." Small focused PRs
+This is a demo repo so the bar is "does it teach something." Small focused PRs
 that sharpen a module, add a drill, or port a pattern to another runtime are all
-fair game. Work happens on feature branches with PRs rather than straight to
-`main`, and each completed module gets a tag.
+fair game. Feature branches and PRs, never straight to `main`. Each completed
+module gets a tag.
