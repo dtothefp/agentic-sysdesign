@@ -1,9 +1,8 @@
 """The actual per-influencer work a fan-out task does, in two modes.
 
-live: the real Instagram scrape via Apify's run-sync-get-dataset-items endpoint, the same
-      actor and payload shape the scrape-signals skill uses, but writing straight to Postgres
-      through common.signals.insert_signal instead of POSTing over HTTP (the worker is a
-      writer in its own right now, not an API client).
+live: the real Instagram scrape via Apify's run-sync-get-dataset-items endpoint, writing
+      straight to Postgres through common.signals.insert_signal instead of POSTing over
+      HTTP (the worker is a writer in its own right, not an API client).
 
 demo: synthetic signals with a small sleep between each, so you can watch the fan-out and the
       SSE progress bar move without spending Apify credits. Same idempotent write path, so it

@@ -114,7 +114,7 @@
           "influencers"
         ],
         "summary": "Create Influencers",
-        "description": "Seed the whole watchlist in one call. Same idempotent upsert as the single POST, run\nonce per row inside a single transaction. This is how the scrape-signals skill loads the\nwatchlist before scraping (POST the list, then GET it back for ids).",
+        "description": "Seed the whole watchlist in one call. Same idempotent upsert as the single POST, run\nonce per row inside a single transaction. This is how a client loads the watchlist before\nkicking off a run (POST the list, then GET it back for ids).",
         "operationId": "create_influencers",
         "requestBody": {
           "content": {
@@ -932,7 +932,7 @@
           "digests"
         ],
         "summary": "Create Digest",
-        "description": "Mint a queued digest row and return it. Not a trigger, a row factory: the digest agent\n(started by a deployment, packages/agents/deployment.yaml) calls this as its first step to get an id,\nwrites the digest, then completes the row via PUT /digests/{id}/content.",
+        "description": "Mint a queued digest row and return it. Not a trigger, a row factory: the digest agent\n(started by a deployment, services/managed-agents/deployment.yaml) calls this as its first step to get an id,\nwrites the digest, then completes the row via PUT /digests/{id}/content.",
         "operationId": "create_digest",
         "security": [
           {

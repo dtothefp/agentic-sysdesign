@@ -592,8 +592,8 @@ celery-beat, which can only speak "enqueue a task by name on a schedule", has so
 schedule (`beat_schedule` in `worker/celery_app.py`). Beat is a separate little process
 (`moon run worker:beat`), cron for Celery. If you set a breakpoint in `refresh_rollup_task`
 and never hit it, that's why. Nobody enqueues it unless beat is running. The backstop
-exists because runs aren't the only door into `raw_signals` (the scrape-signals skill
-POSTs to `/signals` directly, and those inserts never pass through `finalize_run`), so
+exists because runs aren't the only door into `raw_signals` (any client can POST `/signals`
+directly, and those inserts never pass through `finalize_run`), so
 beat guarantees the dashboard is never more than ~5 minutes stale no matter which door
 the data came in. And since any process that imports the celery app can be a producer,
 a "refresh now" button in the API would just be `refresh_rollup_task.delay()`.
@@ -665,9 +665,9 @@ The first live run ever attempted failed all 5 tasks with `HTTPError: HTTP Error
 Request` and nothing else, because the original `_apify_run` discarded the HTTP response
 body. Reading that body gave the actual reason in one line, Apify validates
 `onlyPostsNewerThan` against a regex that accepts ISO timestamps ending in `Z` only, and
-Python's `isoformat()` spells UTC as `+00:00`. The scrape-signals skill never hit this
-because it reads the watermark from the API's JSON, where pydantic spells UTC as `Z`.
-Same database column, two spellings, one strict regex.
+Python's `isoformat()` spells UTC as `+00:00`. Reading the watermark over HTTP never hit this,
+because pydantic spells UTC as `Z` on the way out. The worker reads the column straight from
+Postgres, so it saw the other spelling. Same column, two spellings, one strict regex.
 
 Two fixes shipped. The watermark is normalized to `%Y-%m-%dT%H:%M:%SZ`, and `_apify_run`
 now raises with the response body included, so the run's `error` column stores the real

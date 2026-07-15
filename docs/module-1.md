@@ -35,8 +35,8 @@ On top of the schema, `services/api/` is a thin FastAPI surface. `/influencers` 
 POST `/influencers/bulk` for the whole watchlist, both upsert on `instagram_handle`; PATCH
 advances the watermark), `/sources`, `/signals` (POST is the idempotent `ON CONFLICT` upsert
 with a server-derived `content_hash`; GET requires a `from`/`to` window so every read prunes),
-and `/rollup` (reads the matview). Real data comes in through the in-repo `scrape-signals`
-skill, which drives that API the same way any HTTP client would.
+and `/rollup` (reads the matview). Real data comes in through the Celery scrape that Module 2
+adds on top of this surface; anything can also POST `/signals` directly.
 
 ## Why these choices
 
@@ -154,7 +154,7 @@ moon run core:status     # all 4 migrations show as applied, none pending
 ```
 
 `moon run core:db-empty` is the truly-empty path (no rows at all), which is what you want when the
-skill is going to add influencers through the API. `moon run core:db-fresh` is the same clean re-migrate
+influencers are going in through the API instead. `moon run core:db-fresh` is the same clean re-migrate
 but seeds only the watchlist influencers. `moon run core:db-init` additionally loads 4000 synthetic
 signals for drill volume (you'll want that for Phase 4).
 
@@ -169,7 +169,7 @@ Open `/docs` and exercise the surface. POST `/influencers/bulk` with the watchli
 second return `inserted: false` (idempotency). GET `/signals` requires a `from`/`to` window,
 which is the design point: every read carries the partition key so the planner can prune.
 
-### Phase 3, real data through the scrape skill
+### Phase 3, real data
 
 With the API still running, from the repo root:
 
@@ -177,21 +177,21 @@ With the API still running, from the repo root:
 # seed the watchlist through the API (POST /influencers/bulk)
 curl -s -X POST localhost:8000/influencers/bulk \
   -H 'content-type: application/json' \
-  -d @.claude/skills/scrape-signals/watchlist.json
+  -d @packages/core/common/watchlist.json
 
 # scrape each creator's newest post, incremental off each watermark
-uv run python .claude/skills/scrape-signals/scrape_ig.py
-
-# then fill older partitions: pull the last N posts per creator, ignoring the watermark
-uv run python .claude/skills/scrape-signals/scrape_ig.py --backfill --limit 12
+curl -s -X POST localhost:8000/runs -H 'content-type: application/json' \
+  -d '{"mode":"live","limit":12}'
 ```
 
-The first scrape inserts each creator's newest post and advances the watermark. `--backfill`
-looks backward instead of forward, pulls the last N posts regardless of the watermark, and
-deliberately does not advance it, so it fills history without disturbing the forward cursor.
-Watch the per-creator output. `inserted` counts new rows, `already-had` counts idempotent
-no-ops on a re-run, and `skipped` counts posts whose month has no partition. Needs
-`APIFY_API_KEY` in the repo-root `.env` (gitignored).
+The scrape itself is Module 2's Celery fan-out: `POST /runs` queues one task per creator and
+each worker pulls that creator's posts from Apify and writes them straight to Postgres. It's
+forward-only off the watermark. The first run inserts each creator's newest post and advances
+the watermark, so a second run back to back inserts ~0. That's the incremental contract.
+
+Posts whose month has no partition are rejected rather than inserted, which is the
+partitioning lesson rather than a bug. Live runs need `APIFY_API_KEY` in the repo-root `.env`
+(gitignored). `{"mode":"demo"}` exercises the same path with synthetic signals and no Apify spend.
 
 ### Phase 4, the EXPLAIN drills (the SQL nitty-gritty)
 
