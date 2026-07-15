@@ -1,13 +1,14 @@
 # Deploy infra (Module 3)
 
 Railway project **sysdesign** (`12dffbd4-65bd-44f7-83b7-d30238c92892`), one `production`
-environment, three services. Postgres is NOT here, it lives on Supabase
+environment, four services. Postgres is NOT here, it lives on Supabase
 (project `bmrwhbubywwaxyyynvgx`, reached via the us-east-1 session pooler).
 
 | Service | Source | Runs |
 |---|---|---|
-| `api` | GitHub `dtothefp/sysdesign`, root = repo root | uvicorn via `services/api/railway.json`, public domain |
+| `api` | GitHub `dtothefp/to-the-moon`, root = repo root | uvicorn via `services/api/railway.json`, public domain |
 | `worker` | same repo + root | Celery worker with beat embedded, via `services/worker/railway.json`, private |
+| `chat` | same repo + root | Module 7 chat agent via `services/agent/railway.json`, public domain |
 | `redis` | image `redis:7-alpine` + volume | broker, result backend, SSE pub/sub, private |
 
 ## Where each piece of config lives (the IaC-lite contract)
