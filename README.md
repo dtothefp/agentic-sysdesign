@@ -1,4 +1,4 @@
-# agentic-sysdesign
+# to-the-moon
 
 ```
                 *        .           ✦                 .    ·        *
@@ -12,7 +12,7 @@
                   .                          .        ·           *
    ·        *                  ✦                            .
                                                                      ·
-   scrape ──▶ fan out ──▶ rate ──▶ embed ──▶ search ──▶ chat
+   fan out ──▶ scrape ──▶ rate ──▶ embed ──▶ search ──▶ chat
 ```
 
 A playground for agentic skeletons who like fun tools.
@@ -22,17 +22,27 @@ A playground for agentic skeletons who like fun tools.
 ## The pipeline
 
 ```
-  Instagram posts
-        │  Apify scrape, driven by an in-repo Claude Code skill
-        ▼
   FastAPI ──── POST /runs ────▶ Celery chord fan-out
-        │                       one task per creator, progress
-        │                       streamed to the browser over SSE
-        ▼                            │
-  Postgres on Supabase               ▼
-   partitioned tables         rate + embed stages
-   full-text GIN index        one decoupled Celery job per new
-   pgvector HNSW index        signal, LLM behind one adapter
+                                  one task per creator, progress
+                                  streamed to the browser over SSE
+                                       │
+                                       ▼
+                                  Apify scrape
+                                  each worker pulls its creator's recent
+                                  Instagram posts, writes them straight
+                                  to Postgres, and enqueues what's new
+                                       │
+                                       ▼
+                                  rate + embed stages
+                                  one decoupled Celery job per new
+                                  signal, LLM behind one adapter
+                                       │
+        ┌──────────────────────────────┘
+        ▼
+  Postgres on Supabase
+   partitioned tables
+   full-text GIN index
+   pgvector HNSW index
         │
         ▼
   hybrid search (lexical + semantic, fused with RRF)
@@ -99,7 +109,6 @@ services/managed-agents/ Anthropic Managed Agents config (agent.yaml) + agentctl
 packages/core/           shared code, db migrations, EXPLAIN drills
 packages/task-contract/  task names + send-only Celery client (api never imports worker)
 infra/                   Railway env-var sync + per-PR preview environments
-.claude/skills/          in-repo Claude Code skills (the scraper is a skill, not a cron)
 .devcontainer/           reproducible container with its own Postgres
 ```
 

@@ -16,7 +16,7 @@ versionConstraint: '>=2.4.0'
 # Mixed form: globs for the three tiers, plus an explicit root project. The root
 # project (moon.yml at the repo root) owns workspace-level lifecycle tasks that
 # belong to no single member: docker compose up/down, setup/reset, ollama-pull,
-# and lint/format for loose files (infra/, .claude/skills/).
+# and lint/format for loose files (infra/).
 projects:
   globs:
     - 'apps/*'

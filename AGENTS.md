@@ -160,7 +160,6 @@ services/managed-agents/  Module 5 Anthropic Managed Agents: agent.yaml + agentc
 packages/core/    shared code (sysdesign-core): common/, db/migrations/, drills/, tests/
 packages/task-contract/  task-name constants + send-only Celery client (api->worker contract)
 infra/            Railway env-var sync + preview-env scripts
-.claude/skills/   in-repo skills (e.g. scrape-signals), tracked branch-by-branch with the code they drive
 .devcontainer/    reproducible container (its own sibling Postgres at db:5432)
 ```
 
@@ -182,7 +181,7 @@ All from the repo root:
 moon run root:setup        # HOST: docker compose up db, then migrate + full seed
 moon run core:db-init      # DEV CONTAINER: migrate + full seed (influencers + 4000 drill signals)
 moon run core:db-fresh     # DEV CONTAINER: drop db, re-migrate from empty, seed ONLY influencers (no signals)
-moon run core:db-empty     # DEV CONTAINER: drop db, re-migrate from empty, seed NOTHING (skill adds influencers via API)
+moon run core:db-empty     # DEV CONTAINER: drop db, re-migrate from empty, seed NOTHING (add influencers via the API)
 moon run core:migrate      # apply pending dbmate migrations (packages/core/db/migrations/*.sql)
 moon run core:status       # which migrations have run vs pending
 moon run core:rollback     # undo the most recent migration (its migrate:down)
@@ -195,7 +194,7 @@ moon run worker:dev        # DEV CONTAINER: Celery worker for Module 2 fan-out j
 moon run worker:beat       # DEV CONTAINER: Celery beat, periodic backstops (rollup refresh + unrated sweep)
 moon run root:ollama-pull  # DEV CONTAINER: one-time pull of the Module 4 local rating model (llama3.2:1b)
 moon run api:openapi       # export the OpenAPI spec to services/api/openapi.json (no db/server needed)
-moon run :lint             # every project's ruff check + format check (root covers infra/ + .claude/)
+moon run :lint             # every project's ruff check + format check (root covers infra/)
 moon run :test             # every project's pytest; integration tests auto-skip when Postgres is down
 moon run root:format       # auto-apply ruff's formatter across the whole workspace
 moon run root:down         # drop the volume
@@ -208,11 +207,10 @@ single creator, POST `/influencers/bulk` for the whole watchlist, both upsert on
 instagram_handle; PATCH advances the last_scraped_at watermark), `/sources`, `/signals` (POST
 is the idempotent `ON CONFLICT` upsert, content_hash derived server-side; GET requires a
 `from`/`to` window so it always prunes), and `/rollup` (reads the matview). To populate real
-data, use the in-repo `scrape-signals` skill (`.claude/skills/scrape-signals/`), which is how
-Claude Code drives the database. It's a loop over the API: POST the watchlist, GET it back,
-scrape each creator's recent IG posts (Apify REST, in parallel, incremental off each
-watermark), then POST each post to `/signals`. There's no scrape task; it's a skill Claude
-Code runs, not a build target. Needs `APIFY_API_KEY` in the repo-root `.env` (gitignored, never commit it).
+data, POST `/runs` with `{"mode": "live"}`. That fans out one Celery task per creator and each
+worker does the real Apify scrape itself, writing straight to Postgres (`services/worker/worker/scrape.py`)
+rather than POSTing back over HTTP. `{"mode": "demo"}` runs the same fan-out with synthetic
+signals and no Apify spend. Live mode needs `APIFY_API_KEY` in the repo-root `.env` (gitignored, never commit it).
 
 FastAPI generates the OpenAPI spec automatically (`/openapi.json`, Swagger at `/docs`,
 ReDoc at `/redoc`); no separate OpenAPI library. `operationId`s are the handler names

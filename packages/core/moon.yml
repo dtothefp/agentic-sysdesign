@@ -65,7 +65,7 @@ tasks:
     options:
       cache: false
 
-  # seed ONLY the watchlist influencers (from the skill's watchlist.json). No signal volume.
+  # seed ONLY the watchlist influencers (from common/watchlist.json). No signal volume.
   seed-influencers:
     command: 'uv run --package sysdesign-core python -m common.seed --influencers-only'
     toolchain: 'system'
@@ -99,15 +99,15 @@ tasks:
     options:
       cache: false
 
-  # DEV CONTAINER truly empty: drop + re-migrate, seed NOTHING. Use when the scrape-signals
-  # skill should add the influencers through the API instead of the Python seed. Stop
-  # api:dev first (an open connection blocks DROP DATABASE).
+  # DEV CONTAINER truly empty: drop + re-migrate, seed NOTHING. Use when the influencers
+  # should go in through the API instead of the Python seed. Stop api:dev first (an open
+  # connection blocks DROP DATABASE).
   db-empty:
     script: |
       : "${DATABASE_URL:=postgresql://lab:lab@localhost:5432/sysdesign}"
       dbmate --no-dump-schema --migrations-dir db/migrations --url "$DATABASE_URL?sslmode=disable" drop || true
       dbmate --no-dump-schema --migrations-dir db/migrations --url "$DATABASE_URL?sslmode=disable" up
-      echo "empty db at $DATABASE_URL: migrations applied, no rows. add influencers via the scrape-signals skill."
+      echo "empty db at $DATABASE_URL: migrations applied, no rows. add influencers via POST /influencers/bulk."
     toolchain: 'system'
     options:
       cache: false

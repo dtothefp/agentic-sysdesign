@@ -2,16 +2,16 @@
 three months so partition pruning has something to prune.
 
 Two distinct things get seeded, on purpose:
-  * The Defrag watchlist (name + Instagram handle), read from the scrape-signals skill's
-    watchlist.json so there's one source of truth. These are the rows the scraper fills with
-    real posts. Re-adding a handle is a no-op (ON CONFLICT on the handle).
+  * The Defrag watchlist (name + Instagram handle), read from watchlist.json next to this
+    file. These are the rows the Celery scrape fills with real posts. Re-adding a handle is
+    a no-op (ON CONFLICT on the handle).
   * Synthetic signal volume, so the EXPLAIN drills mean something before any scraping. A
     handful of real posts per creator wouldn't move a query plan; 4000 rows across three
     partitions will. These are generic filler, not real content.
 
-This is the one-shot convenience so `moon run core:db-init && moon run core:drills` works. The skill does the
-same watchlist load through the API (POST /influencers/bulk) when Claude Code drives it live.
-Both read the same watchlist.json, so they can't drift.
+This is the one-shot convenience so `moon run core:db-init && moon run core:drills` works. The
+same watchlist can be loaded through the API instead (POST /influencers/bulk), which is the
+path any client uses. Both end at the same idempotent upsert.
 
 Every insert is idempotent on the locked unique key, so running this twice inserts nothing
 the second time. That one line of SQL is the idempotency contract and the answer to most
@@ -32,26 +32,13 @@ import psycopg
 from common.db import DATABASE_URL
 from common.hashing import content_hash
 
-# Single source of truth for who we track: the skill's watchlist.json. Walk up from this
-# file looking for the repo-root .claude/ path (packages/core/common -> 3 levels), with a
-# fallback so the seed stays runnable if the skill dir isn't present.
-_WATCHLIST_REL = Path(".claude") / "skills" / "scrape-signals" / "watchlist.json"
-_FALLBACK = [{"name": "Example Creator", "instagram_handle": "example_creator"}]
-
-
-def _find_watchlist() -> Path | None:
-    for base in [Path.cwd(), *Path(__file__).resolve().parents]:
-        candidate = base / _WATCHLIST_REL
-        if candidate.is_file():
-            return candidate
-    return None
+# Single source of truth for who we track. Lives next to this file, its only reader. The
+# seed loads it into the influencers table; the worker fans out over that table, not this.
+_WATCHLIST = Path(__file__).resolve().parent / "watchlist.json"
 
 
 def load_watchlist() -> list[dict]:
-    path = _find_watchlist()
-    if path is not None:
-        return json.loads(path.read_text())
-    return _FALLBACK
+    return json.loads(_WATCHLIST.read_text())
 
 
 # deterministic so re-seeding produces the same content_hash set (true idempotency)
