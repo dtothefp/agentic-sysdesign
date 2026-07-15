@@ -124,7 +124,7 @@ class Rating(BaseModel):
 # --- Module 5: agent-written digests ---------------------------------------------
 #
 # No trigger model here anymore. A digest run is started by triggering a Managed Agents
-# deployment (packages/agents/deployment.yaml), not by POSTing a trigger body. The agent creates its
+# deployment (services/managed-agents/deployment.yaml), not by POSTing a trigger body. The agent creates its
 # own row (POST /digests, no body) and delivers into it (PUT /digests/{id}/content,
 # DigestContent), so the only digest input the API still takes is the delivered markdown.
 

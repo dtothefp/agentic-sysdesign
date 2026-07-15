@@ -53,13 +53,13 @@ import yaml
 
 HERE = Path(__file__).resolve().parent
 
-# Run as a plain script (`python packages/agents/agentctl.py`), so put packages/core on
-# the import path for `common` (env.py is stdlib-only, which is what keeps CI's plain
+# Run as a plain script (`python services/managed-agents/agentctl.py`), so put packages/core
+# on the import path for `common` (env.py is stdlib-only, which is what keeps CI's plain
 # python + pip pyyaml path working with no uv sync). Then load the root .env so a local
 # run has both ANTHROPIC_API_KEY (which `ant` reads) and SYSDESIGN_API_KEY (injected into
 # the vault credentials). load_local_env is env-first, so CI's real env vars win and
 # it's a no-op when there's no .env (the CI case).
-sys.path.insert(0, str(HERE.parent / "core"))
+sys.path.insert(0, str(HERE.parent.parent / "packages" / "core"))
 from common.env import load_local_env  # noqa: E402
 
 load_local_env()

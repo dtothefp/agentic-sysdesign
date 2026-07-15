@@ -1,7 +1,7 @@
 # moon project: the Module 7 chat agent (Python). A ReAct loop over the sysdesign REST API,
-# exposed as a CLI and a /chat SSE server off one generator. Application tier, but it never
-# deploys as its own Railway service yet; for now it runs locally against the api (local or the
-# deployed prod URL via SYSDESIGN_API_URL). Depends on core only for the .env loader.
+# exposed as a CLI and a /chat SSE server off one generator. Deploys as its own Railway
+# service (chat.thedefrag.ai, railway.json here); locally it runs against the api (local or
+# the deployed prod URL via SYSDESIGN_API_URL). Depends on core only for the .env loader.
 $schema: 'https://moonrepo.dev/schemas/project.json'
 
 stack: 'backend'

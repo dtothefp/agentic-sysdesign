@@ -141,7 +141,7 @@ the answer can change per workload as the hosted offerings evolve.
 A moon + uv-workspace monorepo. One `uv.lock` at the root covers every workspace member,
 and moon is the ONE task runner (no Makefile). Tasks live in the project that owns them:
 db lifecycle in `packages/core` (it owns the migrations), agent hand-cranks in
-`packages/agents`, dev servers in `services/*`, and workspace lifecycle (compose up/down,
+`services/managed-agents`, dev servers in `services/*`, and workspace lifecycle (compose up/down,
 setup, format, ollama-pull) in the root-level moon project (`moon.yml` at the repo root).
 moon is a standalone Rust binary, not a node package. Install it with `brew install moon`
 on the host; the dev container and Cursor Cloud VM fetch a pinned release binary in their
@@ -154,9 +154,11 @@ moon.yml          root moon project: workspace lifecycle tasks (root:up, root:se
 apps/chat-web/    React chat agent UI (scaffold, Module 7)
 services/api/     FastAPI surface (sysdesign-api): api/, tests/, railway.json, openapi.json
 services/worker/  Celery worker + beat (sysdesign-worker): worker/, railway.json
+services/agent/   Module 7 chat agent, Python (sysdesign-agent): ReAct loop, CLI + SSE server, railway.json
+services/agent-ts/  Module 7 chat agent, TypeScript: same contract, native async generators
+services/managed-agents/  Module 5 Anthropic Managed Agents: agent.yaml + agentctl.py
 packages/core/    shared code (sysdesign-core): common/, db/migrations/, drills/, tests/
 packages/task-contract/  task-name constants + send-only Celery client (api->worker contract)
-packages/agents/  Module 5 Managed Agents YAML + agentctl.py
 infra/            Railway env-var sync + preview-env scripts
 .claude/skills/   in-repo skills (e.g. scrape-signals), tracked branch-by-branch with the code they drive
 .devcontainer/    reproducible container (its own sibling Postgres at db:5432)

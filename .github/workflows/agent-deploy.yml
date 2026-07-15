@@ -1,13 +1,13 @@
 # Deploy the Module 5 digest agent to the Managed Agents control plane, the
 # standard CI/CD flow: a named agent + named deployment per environment, driven
-# by packages/agents/agentctl.py (a thin `ant` CLI wrapper, see that file).
+# by services/managed-agents/agentctl.py (a thin `ant` CLI wrapper, see that file).
 #
 #   Manual dispatch  -> one input, the tier. Everything else is inferred:
 #                       - local: branch = the ref you dispatched from; base URL =
 #                         the cloudflared tunnel; deploys AND runs (you dispatch a
 #                         local deploy to watch the agent hit your laptop).
 #                       - prod:  base URL = sysdesign.thedefrag.ai; deploys only,
-#                         no run (prod is manual; trigger with `TIER=prod moon run agents:run`).
+#                         no run (prod is manual; trigger with `TIER=prod moon run managed-agents:run`).
 #   Merge to main    -> upsert the prod agent + deployment so main always has a
 #                       current prod deployment. Does NOT run (a real prod system
 #                       would schedule it, see deployment.yaml).
@@ -57,9 +57,9 @@ jobs:
           # (TIER_BASE_URLS) for local and prod; the branch (local only) is the ref
           # this workflow was dispatched from.
           if [ "$TIER" = "local" ]; then
-            python packages/agents/agentctl.py deploy --tier local --branch "$REF_NAME" --sha "$SHA" --run
+            python services/managed-agents/agentctl.py deploy --tier local --branch "$REF_NAME" --sha "$SHA" --run
           else
-            python packages/agents/agentctl.py deploy --tier prod --sha "$SHA"
+            python services/managed-agents/agentctl.py deploy --tier prod --sha "$SHA"
           fi
 
       - name: Deploy prod (merge to main)
@@ -67,4 +67,4 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SYSDESIGN_API_KEY: ${{ secrets.SYSDESIGN_API_KEY }}
-        run: python packages/agents/agentctl.py deploy --tier prod --sha "${{ github.sha }}"
+        run: python services/managed-agents/agentctl.py deploy --tier prod --sha "${{ github.sha }}"

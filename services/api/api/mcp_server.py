@@ -24,7 +24,7 @@ protection is off because the Host varies across tiers (localhost, the Cloudflar
 hostname, per-PR *.up.railway.app, the prod domain) and we enforce our own bearer auth on the
 `/mcp` path instead (api/main.py, the same inert-until-keyed SYSDESIGN_API_KEY contract as the
 REST routes). The vault injects that bearer at egress via a static_bearer credential keyed to
-this server's URL (packages/agents/vault/mcp-bearer.yaml); the sandbox never sees the token.
+this server's URL (services/managed-agents/vault/mcp-bearer.yaml); the sandbox never sees the token.
 """
 
 from common.clusters import get_signal_clusters as _clusters

@@ -1,7 +1,7 @@
 # sysdesign-agent-ts
 
 A TypeScript rebuild of the Module 7 chat agent, running side by side with the Python one
-(`packages/agent/`). Same job, same wire contract, different runtime. It's a ReAct loop over the
+(`services/agent/`). Same job, same wire contract, different runtime. It's a ReAct loop over the
 sysdesign REST API, exposed as a CLI and an SSE server, hostable as its own Railway service.
 
 The point of building it twice is the concurrency contrast (below). Everything else is deliberately

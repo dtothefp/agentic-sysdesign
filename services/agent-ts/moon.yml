@@ -1,4 +1,4 @@
-# moon project: the Module 7 chat agent (TypeScript). Parallel of packages/agent — same ReAct
+# moon project: the Module 7 chat agent (TypeScript). Parallel of services/agent — same ReAct
 # loop and /chat SSE contract, native async generators. Node 22 on PATH (devcontainer feature).
 # Run `npm ci` here once after clone (postCreate does it); moon tasks call node_modules/.bin
 # directly so you never need to type npm run.

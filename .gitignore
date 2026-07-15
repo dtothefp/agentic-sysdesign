@@ -4,7 +4,7 @@ __pycache__/
 .env
 .DS_Store
 uv.lock.bak
-packages/agents/output/
+services/managed-agents/output/
 
 # moon task runner (repo-pinned via package.json) + its cache
 node_modules/
