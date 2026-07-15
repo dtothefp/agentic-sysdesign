@@ -1,10 +1,17 @@
 # agentic-sysdesign
 
 ```
-        *   .          ✦                 .   ·
-   ·         ◐  moon runs the tasks          *
-      ✦   .        ·          .    ✦
-                                                  ·
+                *        .           ✦                 .    ·        *
+      ·                 _..._                                   .
+            ✦         .::::: `.                                       ✦
+                     :::::::::  \       m o o n   r u n s
+     *               ::::::::::  |        t h e   t a s k s
+         .           `:::::::::  /                           ·
+              ·        `::::: _.'              *        .
+       ✦                 `"'          ✦
+                  .                          .        ·           *
+   ·        *                  ✦                            .
+                                                                     ·
    scrape ──▶ fan out ──▶ rate ──▶ embed ──▶ search ──▶ chat
 ```
 
