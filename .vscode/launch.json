@@ -94,6 +94,44 @@
       }
     },
     {
+      // The chat gateway (services/chat), instance A on :8100. Breakpoints in the /ws receive
+      // loop, persist_and_fanout(), and the REST send/history handlers hit here. Drive it with a
+      // websocat client + curl (see the send commands), or launch the "Chat: split-brain (A+B)"
+      // compound to debug the multi-instance bug across both processes at once. No --reload: the
+      // reloader spawns a child and breakpoints would bind to the parent and never fire.
+      "name": "Chat A (WebSocket :8100)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["chat.main:app", "--host", "0.0.0.0", "--port", "8100"],
+      "cwd": "${workspaceFolder}",
+      "python": "/home/vscode/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "DATABASE_URL": "postgresql://lab:lab@db:5432/sysdesign",
+        "REDIS_URL": "redis://redis:6379"
+      }
+    },
+    {
+      // Instance B on :8101. Same service, second process. Running A and B together is what
+      // exposes the split-memory bug: the `conns` dict is process-local, so a socket registered
+      // in B is invisible to A. Only needed for the split-brain demo (or its compound below).
+      "name": "Chat B (WebSocket :8101)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["chat.main:app", "--host", "0.0.0.0", "--port", "8101"],
+      "cwd": "${workspaceFolder}",
+      "python": "/home/vscode/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "DATABASE_URL": "postgresql://lab:lab@db:5432/sysdesign",
+        "REDIS_URL": "redis://redis:6379"
+      }
+    },
+    {
       // PRIMARY way to step the TS ReAct loop. Runs `tsx src/cli.ts "<prompt>"` synchronously,
       // no SSE in the way, so breakpoints in services/agent-ts/src/loop.ts (runAgent,
       // anthropicComplete) and tools.ts hit directly. Edit `args` to change the prompt. Needs
@@ -170,6 +208,16 @@
       // and stream_run's gen() while a curl -N is attached.
       "name": "API + Worker",
       "configurations": ["API (FastAPI :8000)", "Celery Worker (solo pool)"],
+      "stopAll": true
+    },
+    {
+      // The split-brain demo, debuggable across both instances. Both run with breakpoints live.
+      // Connect a websocat client for user 2 to :8101 (instance B), then POST a send for user 1
+      // to :8100 (instance A). Break in A's persist_and_fanout: `conns` there does NOT contain
+      // user 2, because that socket was registered in B's separate process. The push never
+      // fires and B's client sees nothing. That is the exact gap Redis pub/sub closes in 3c.
+      "name": "Chat: split-brain (A + B)",
+      "configurations": ["Chat A (WebSocket :8100)", "Chat B (WebSocket :8101)"],
       "stopAll": true
     }
   ]
