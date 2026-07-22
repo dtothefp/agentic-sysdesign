@@ -22,6 +22,9 @@ Supabase (Postgres) and, later, Redis + Celery. No frontend; test from the termi
 
 Branch: `messaging-app-drill`. PR: dtothefp/to-the-moon#51.
 
+Deep dive on step 1 (schema, single-instance design, the split-brain demo):
+[docs/messaging-step-1-single-instance.md](../../docs/messaging-step-1-single-instance.md).
+
 ## The schema (packages/core/db/migrations/20260721000001_messaging_schema.sql)
 
 Four tables, `msg_` prefixed to coexist with the scraper schema in the same DB:
