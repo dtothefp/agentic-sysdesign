@@ -13,6 +13,7 @@ members = [
     "sysdesign-agent",
     "sysdesign-agents",
     "sysdesign-api",
+    "sysdesign-chat",
     "sysdesign-core",
     "sysdesign-task-contract",
     "sysdesign-worker",
@@ -1250,6 +1251,29 @@ requires-dist = [
     { name = "sse-starlette", specifier = ">=2.1" },
     { name = "sysdesign-core", editable = "packages/core" },
     { name = "sysdesign-task-contract", editable = "packages/task-contract" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+]
+
+[[package]]
+name = "sysdesign-chat"
+version = "0.1.0"
+source = { editable = "services/chat" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "psycopg-pool" },
+    { name = "pydantic" },
+    { name = "sysdesign-core" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
+    { name = "psycopg-pool", specifier = ">=3.2" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "sysdesign-core", editable = "packages/core" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 

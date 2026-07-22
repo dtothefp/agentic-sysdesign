@@ -9,6 +9,8 @@
 #   redis-cli -> redis-tools (client only): inspect the Module 2 broker/result-backend
 #                keys, LLEN/LRANGE the queue, MONITOR, SUBSCRIBE run:<id>. The server
 #                is the sibling `redis` service, so use it as `redis-cli -h redis`.
+#   websocat  -> a WebSocket client (curl for ws://) for driving the chat gateway's /ws
+#                endpoint from the terminal.
 # Postgres itself is the sibling `db` service, not installed here.
 FROM mcr.microsoft.com/devcontainers/python:3.13
 
@@ -41,3 +43,16 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 RUN ARCH=$(dpkg --print-architecture) \
  && curl -fsSL -o /usr/local/bin/dbmate "https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-${ARCH}" \
  && chmod +x /usr/local/bin/dbmate
+
+# websocat: a single-binary WebSocket client, curl for ws://. Used to drive the chat gateway
+# (services/chat) from the terminal: connect to /ws, send action frames up, watch pushes come
+# down. A static musl build from the GitHub release, pinned and arch-matched, same approach as
+# moon and dbmate above.
+ARG WEBSOCAT_VERSION=1.13.0
+RUN case "$(dpkg --print-architecture)" in \
+      amd64) TARGET=x86_64-unknown-linux-musl ;; \
+      arm64) TARGET=aarch64-unknown-linux-musl ;; \
+      *) echo "unsupported arch $(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac \
+ && curl -fsSL -o /usr/local/bin/websocat "https://github.com/vi/websocat/releases/download/v${WEBSOCAT_VERSION}/websocat.${TARGET}" \
+ && chmod +x /usr/local/bin/websocat

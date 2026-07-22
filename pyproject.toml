@@ -6,6 +6,7 @@
 [tool.uv.workspace]
 members = [
   "services/api",
+  "services/chat",
   "services/worker",
   "services/agent",
   "services/managed-agents",

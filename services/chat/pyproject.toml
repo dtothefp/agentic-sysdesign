@@ -1,0 +1,23 @@
+[project]
+name = "sysdesign-chat"
+version = "0.1.0"
+description = "The chat gateway: FastAPI + WebSocket direct-messaging service over the msg_* tables. Holds a live socket per online user and pushes messages the instant they land. Separate from sysdesign-api because it scales on connection count, not CPU-per-job."
+requires-python = ">=3.13"
+dependencies = [
+  "sysdesign-core",
+  "psycopg[binary]>=3.2",
+  "psycopg-pool>=3.2",
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30", # [standard] pulls in websockets, the ASGI WS implementation
+  "pydantic>=2.0",
+]
+
+[tool.uv.sources]
+sysdesign-core = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["chat"]

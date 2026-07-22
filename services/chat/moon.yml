@@ -1,0 +1,35 @@
+# moon project: the chat gateway (FastAPI + WebSocket). Same orchestration-only shape as the
+# api service: tasks shell out to uv, moon owns the task graph and affected-detection.
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+stack: 'backend'
+layer: 'application'
+language: 'python'
+
+dependsOn:
+  - 'core'
+
+tasks:
+  dev:
+    command: 'uv run --package sysdesign-chat uvicorn chat.main:app --reload --host 0.0.0.0 --port 8100'
+    toolchain: 'system'
+    options:
+      cache: false
+      persistent: true
+
+  # A second instance on a different port. Running dev + dev-b at once reproduces the
+  # split-memory bug: a socket on :8100 cannot see one on :8101, because `conns` is per-process.
+  # That is the whole motivation for Redis pub/sub in Phase 3c, made visible locally with no deploy.
+  dev-b:
+    command: 'uv run --package sysdesign-chat uvicorn chat.main:app --reload --host 0.0.0.0 --port 8101'
+    toolchain: 'system'
+    options:
+      cache: false
+      persistent: true
+
+  lint:
+    script: 'uv run ruff check . && uv run ruff format --check .'
+    toolchain: 'system'
+    inputs:
+      - 'chat/**/*.py'
+      - '/pyproject.toml'
