@@ -47,6 +47,7 @@ from api.models import (
     DigestContent,
     Influencer,
     InfluencerIn,
+    InfluencerVibe,
     InfluencerWatermark,
     Rating,
     Run,
@@ -60,6 +61,7 @@ from api.models import (
     SignalInsertResult,
     Source,
     SourceIn,
+    Vibes,
 )
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
@@ -129,6 +131,7 @@ TAGS = [
     {"name": "ratings", "description": "Per-signal AI ratings, keyed on content_hash."},
     {"name": "search", "description": "Module 6: hybrid lexical + semantic search over signal content, fused with RRF."},
     {"name": "digests", "description": "Weekly agent-written digests (Module 5). The agent delivers its own result via PUT."},
+    {"name": "vibes", "description": "Fun, creative analytics and insights about your influencer data."},
 ]
 
 app = FastAPI(
@@ -681,3 +684,112 @@ def deliver_digest(digest_id: int, body: DigestContent):
     if row is None:
         raise HTTPException(404, f"digest {digest_id} not found")
     return row
+
+
+@app.get("/teapot", status_code=418, include_in_schema=False)
+def teapot():
+    """Easter egg: I'm a teapot!"""
+    return {
+        "error": "I'm a teapot",
+        "message": "This API cannot brew coffee because it is, permanently, a teapot.",
+        "hint": "Try /vibes instead for something more useful",
+        "rfc": "RFC 2324"
+    }
+
+
+@app.get("/vibes", response_model=Vibes, tags=["vibes"])
+def get_vibes():
+    """Check the vibes of your influencer data with creative, entertaining insights.
+    Think of it as 'Spotify Wrapped' for your creator watchlist."""
+    with pool.connection() as conn:
+        cur = conn.cursor(row_factory=dict_row)
+        
+        total_signals = cur.execute("SELECT count(*) as cnt FROM raw_signals").fetchone()["cnt"]
+        
+        total_influencers = cur.execute("SELECT count(*) as cnt FROM influencers").fetchone()["cnt"]
+        
+        most_active = cur.execute("""
+            SELECT i.instagram_handle as handle, i.name, count(s.id) as signal_count
+            FROM influencers i
+            LEFT JOIN raw_signals s ON i.id = s.influencer_id
+            GROUP BY i.id, i.instagram_handle, i.name
+            ORDER BY signal_count DESC
+            LIMIT 1
+        """).fetchone()
+        
+        recent_activity = cur.execute("""
+            SELECT count(*) as recent_count
+            FROM raw_signals
+            WHERE captured_at > now() - interval '7 days'
+        """).fetchone()["recent_count"]
+        
+        avg_signals_per_influencer = total_signals / max(total_influencers, 1)
+        
+        vibes = [
+            "absolutely unhinged",
+            "giving main character energy",
+            "slightly chaotic but we're here for it",
+            "honestly iconic",
+            "the vibe is immaculate",
+            "lowkey fire",
+            "chef's kiss perfection",
+            "absolutely sending it",
+            "the energy is unmatched",
+            "straight vibing"
+        ]
+        
+        energy_levels = {
+            (0, 100): ("hibernating", "your influencers are taking a well-deserved nap"),
+            (100, 500): ("chill", "cozy energy, like a Sunday morning"),
+            (500, 1000): ("active", "things are moving, respect"),
+            (1000, 2000): ("buzzing", "the group chat is POPPIN"),
+            (2000, 5000): ("electric", "someone had too much coffee and we love it"),
+            (5000, float('inf')): ("absolutely feral", "unstoppable force of nature, honestly terrifying")
+        }
+        
+        energy_level = "unknown"
+        fun_fact = "your influencers exist in a quantum state"
+        for (low, high), (level, fact) in energy_levels.items():
+            if low <= total_signals < high:
+                energy_level = level
+                fun_fact = fact
+                break
+        
+        if most_active and most_active["signal_count"] > 0:
+            vibe_descriptors = [
+                "is absolutely carrying the team",
+                "is the main character of this story",
+                "said 'watch this' and delivered",
+                "woke up and chose excellence",
+                "is simply built different",
+                "understood the assignment",
+                "came to play",
+                "is the blueprint"
+            ]
+            most_active_vibe = f"@{most_active['handle']} {secrets.choice(vibe_descriptors)}"
+            most_active_influencer = InfluencerVibe(
+                handle=most_active["handle"],
+                name=most_active["name"],
+                signal_count=most_active["signal_count"],
+                vibe=most_active_vibe
+            )
+        else:
+            most_active_influencer = None
+        
+        if recent_activity > 100:
+            vibe_check = f"the timeline is absolutely BUZZING with {recent_activity} signals this week"
+        elif recent_activity > 50:
+            vibe_check = "solid week, your influencers are in their bag"
+        elif recent_activity > 10:
+            vibe_check = "chill vibes only, quality over quantity"
+        else:
+            vibe_check = "it's giving 'mysterious silence' but make it intentional"
+        
+        return Vibes(
+            total_signals=total_signals,
+            total_influencers=total_influencers,
+            most_active_influencer=most_active_influencer,
+            vibe_check=vibe_check,
+            fun_fact=fun_fact,
+            energy_level=energy_level
+        )

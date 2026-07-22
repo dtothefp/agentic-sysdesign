@@ -122,6 +122,22 @@ tasks:
     options:
       cache: false
 
+  # check the vibes of your influencer data (requires api:dev running).
+  vibes:
+    command: 'uv run --package sysdesign-core python -m common.vibes_cli'
+    toolchain: 'system'
+    options:
+      cache: false
+
+  # run fun statistical queries against the database.
+  fun-stats:
+    script: |
+      : "${DATABASE_URL:=postgresql://lab:lab@localhost:5432/sysdesign}"
+      psql "$DATABASE_URL" -f drills/fun-stats.sql
+    toolchain: 'system'
+    options:
+      cache: false
+
   lint:
     script: 'uv run ruff check . && uv run ruff format --check .'
     toolchain: 'system'
