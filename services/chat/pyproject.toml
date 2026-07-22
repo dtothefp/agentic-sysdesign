@@ -10,6 +10,7 @@ dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30", # [standard] pulls in websockets, the ASGI WS implementation
   "pydantic>=2.0",
+  "redis>=5.0",              # async pub/sub bus for cross-instance fan-out (step 2)
 ]
 
 [tool.uv.sources]
