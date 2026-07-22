@@ -22,8 +22,11 @@ Supabase (Postgres) and, later, Redis + Celery. No frontend; test from the termi
 Step 1 landed in dtothefp/to-the-moon#51; the Railway service definition in #52. Step 2 is on
 branch `chat-redis-pubsub`.
 
-Deep dive on step 1 (schema, single-instance design, the split-brain demo):
-[docs/messaging-step-1-single-instance.md](../../docs/messaging-step-1-single-instance.md).
+Deep dives:
+[docs/messaging-step-1-single-instance.md](../../docs/messaging-step-1-single-instance.md)
+(schema, single-instance design, the split-brain demo) and
+[docs/messaging-step-2-redis-pubsub.md](../../docs/messaging-step-2-redis-pubsub.md)
+(pub/sub vs drawers, the envelope vs conns split, the delivery trace, the scaling spectrum).
 
 ## The schema (packages/core/db/migrations/20260721000001_messaging_schema.sql)
 
