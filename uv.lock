@@ -1263,6 +1263,7 @@ dependencies = [
     { name = "psycopg", extra = ["binary"] },
     { name = "psycopg-pool" },
     { name = "pydantic" },
+    { name = "redis" },
     { name = "sysdesign-core" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -1273,6 +1274,7 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "psycopg-pool", specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.0" },
+    { name = "redis", specifier = ">=5.0" },
     { name = "sysdesign-core", editable = "packages/core" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]

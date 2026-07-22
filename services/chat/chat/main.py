@@ -6,11 +6,15 @@ user and scales on connection count. Different shape, different process, so a re
 never drops the other's live sockets. It shares the monorepo's Supabase project through
 packages/core (the msg_* tables) and, later, the same Redis the worker already uses.
 
-PHASE 3a (this file): ONE instance, connections tracked in an in-memory dict. That dict is the
-whole point and also the whole limitation: it lives in THIS process's memory, so if you run two
-instances, instance A cannot see the sockets held by instance B. That is exactly the failure
-Redis pub/sub fixes in 3c. Until then: one process, and the split-brain is left visible on
-purpose so the reason for Redis is felt, not just asserted.
+DELIVERY (step 2, Redis pub/sub): the in-memory `conns` dict is still the per-instance routing
+table, but it is no longer the fan-out mechanism, only the LAST HOP. Step 1 left a split brain
+visible on purpose: with connections tracked in one process's memory, instance A cannot see the
+sockets held by instance B, so a message sent on A never reaches a recipient connected to B. That
+gap is closed here by a Redis pub/sub bus: every send is PUBLISHED to one channel, every instance
+SUBSCRIBES, and each instance delivers only to the sockets it actually holds. A message reaches
+its recipient no matter which instance their socket lives on, and no instance needs a global view
+of who is connected where. Same-instance delivery rides the same path (publish, loopback,
+subscriber, socket), so there is exactly one delivery path, not two.
 
 The socket carries BOTH directions, which is why this is a WebSocket and not SSE:
   * downstream  server -> client : a delivered message, pushed the instant it lands.
@@ -24,7 +28,9 @@ Supabase JWT and `msg_users.external_id` holds the auth `sub`.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 from contextlib import asynccontextmanager
 
 from common.db import DATABASE_URL
@@ -32,6 +38,7 @@ from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnec
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, Field
+from redis import asyncio as aioredis
 
 # Async pool, not the scraper's sync one. Every handler here is `async def` because a WebSocket
 # handler owns its connection for minutes; a blocking DB call would stall the event loop and
@@ -39,11 +46,85 @@ from pydantic import BaseModel, Field
 pool = AsyncConnectionPool(DATABASE_URL, min_size=1, max_size=10, open=False)
 
 
+# --- the inter-instance bus (step 2) ----------------------------------------------
+#
+# `conns` (below) is still this instance's routing table, but it is process-local, so alone it
+# cannot reach a recipient connected to a DIFFERENT instance (the step-1 split brain). Redis
+# pub/sub is the shared bus that closes that gap. Every send is published to ONE channel; every
+# instance subscribes; each instance delivers only to the sockets it holds.
+#
+# One global channel filtered locally is the simplest correct fix. Its known limit: every instance
+# receives every message and drops the ones it can't deliver. The next optimization (named, not
+# built) is per-user or per-conversation channels so a node only receives traffic for users it
+# holds. Not worth it at this scale.
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
+CHANNEL = "chat:fanout"
+
+# Assigned in lifespan. One shared client both PUBLISHES (from the send paths) and, through its
+# pubsub, feeds the single background subscriber task that does all local delivery.
+redis_client: aioredis.Redis | None = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global redis_client
     await pool.open()
-    yield
-    await pool.close()
+    redis_client = aioredis.from_url(REDIS_URL)
+    pubsub = redis_client.pubsub()
+    await pubsub.subscribe(CHANNEL)
+    # The one long-lived consumer for this instance. It runs for the life of the process and is
+    # the ONLY thing that writes to a client socket for fan-out (the sender's own ack aside).
+    subscriber = asyncio.create_task(_subscriber(pubsub))
+    try:
+        yield
+    finally:
+        subscriber.cancel()
+        try:
+            await subscriber
+        except asyncio.CancelledError:
+            pass
+        await pubsub.unsubscribe(CHANNEL)
+        await pubsub.aclose()
+        await redis_client.aclose()
+        await pool.close()
+
+
+# --- the bus consumer + producer --------------------------------------------------
+async def _subscriber(pubsub: aioredis.client.PubSub) -> None:
+    # Blocks on the channel, delivering each envelope to the local sockets named in its recipient
+    # list. Every instance runs one of these; the instance holding a given recipient's socket is
+    # the one that actually pushes to them. Mirrors the api's SSE listen idiom (bytes-decode dance).
+    async for msg in pubsub.listen():
+        if msg["type"] != "message":
+            continue
+        text = msg["data"].decode() if isinstance(msg["data"], bytes) else msg["data"]
+        await _deliver_local(json.loads(text))
+
+
+async def _deliver_local(envelope: dict) -> None:
+    # The last hop. For each recipient with a live socket ON THIS INSTANCE, push. A recipient not
+    # in `conns` is on another instance (whose subscriber will handle them) or offline (already
+    # durable in Postgres, nothing to do here).
+    kind = envelope["kind"]
+    for uid in envelope["recipients"]:
+        ws = conns.get(uid)
+        if ws is None:
+            continue
+        if kind == "message":
+            await ws.send_text(json.dumps({"type": "message", **envelope["payload"]}))
+        elif kind == "typing":
+            await ws.send_text(
+                json.dumps({"type": "typing", "conversation_id": envelope["conversation_id"], "user_id": envelope["user_id"]})
+            )
+
+
+async def _publish(envelope: dict) -> None:
+    # Fan out over the bus instead of straight to local sockets. Every instance's subscriber
+    # (including this one's) receives it and delivers to whichever recipients it holds, which is
+    # why same-instance delivery also rides Redis now: one delivery path, not a local fast path
+    # plus a remote slow path.
+    if redis_client is not None:
+        await redis_client.publish(CHANNEL, json.dumps(envelope))
 
 
 app = FastAPI(title="sysdesign-chat", lifespan=lifespan)
@@ -55,10 +136,11 @@ app = FastAPI(title="sysdesign-chat", lifespan=lifespan)
 # conns[2] and push down it. Absent from the dict == offline == nothing to push to (the message
 # is already saved in Postgres, so they get it from history on reconnect).
 #
-# Two honest simplifications for the drill, both one-liners to remove later:
-#   * one socket per user. Prod is `dict[int, set[WebSocket]]` so a user's phone AND laptop both
-#     receive. Here a second login for the same user replaces the first.
-#   * process-local. This is the dict that does NOT survive going multi-instance. See 3c.
+# Still process-local, but no longer a delivery dead end: it is the LAST HOP behind the Redis bus
+# above. A socket registered here is invisible to other instances, so fan-out publishes to Redis
+# and every instance's subscriber delivers to its own `conns`. One honest simplification remains:
+# one socket per user. Prod is `dict[int, set[WebSocket]]` so a user's phone AND laptop both
+# receive; here a second login for the same user replaces the first.
 conns: dict[int, WebSocket] = {}
 
 
@@ -103,14 +185,12 @@ async def persist_and_fanout(sender_id: int, conversation_id: int, body: str, cl
 
     payload = _message_payload(row)
 
-    # The real-time push. For each recipient with a live socket ON THIS INSTANCE, send it now.
-    # A recipient not in `conns` is offline (from this process's point of view) and simply isn't
-    # pushed to: their message is already durable in Postgres. Waking an offline user (push
-    # notification, email) is the Celery job in a later phase, not this hot path.
-    for uid in recipients:
-        ws = conns.get(uid)
-        if ws is not None:
-            await ws.send_text(json.dumps({"type": "message", **payload}))
+    # Fan out over the bus, AFTER the row is committed (the pool block above has closed). We
+    # publish rather than write to `conns` directly, so the recipient is reached even if their
+    # socket lives on another instance. Recipients online here get it from this instance's own
+    # subscriber; recipients elsewhere get it from theirs; recipients truly offline get nothing
+    # now (the message is durable, and waking them is a later Celery job, not this hot path).
+    await _publish({"kind": "message", "recipients": recipients, "payload": payload})
 
     return payload
 
@@ -158,7 +238,8 @@ async def ws(websocket: WebSocket, user_id: int = Query(...)):
                 # High-frequency, ephemeral, upstream. Never touches Postgres (a typing state is
                 # worthless in 3 seconds), just relayed to the other online participants. THIS is
                 # the traffic that justifies a duplex socket over SSE: it flows client->server
-                # constantly and would need a whole second channel under SSE.
+                # constantly and would need a whole second channel under SSE. It rides the same bus
+                # as messages, so typing also crosses instances (the peer may be on another box).
                 async with pool.connection() as conn:
                     async with conn.cursor() as cur:
                         await cur.execute(
@@ -166,12 +247,9 @@ async def ws(websocket: WebSocket, user_id: int = Query(...)):
                             (frame["conversation_id"], user_id),
                         )
                         others = [r[0] for r in await cur.fetchall()]
-                for uid in others:
-                    peer = conns.get(uid)
-                    if peer is not None:
-                        await peer.send_text(
-                            json.dumps({"type": "typing", "conversation_id": frame["conversation_id"], "user_id": user_id})
-                        )
+                await _publish(
+                    {"kind": "typing", "recipients": others, "conversation_id": frame["conversation_id"], "user_id": user_id}
+                )
 
             else:
                 await websocket.send_text(json.dumps({"type": "error", "detail": f"unknown action {action!r}"}))
