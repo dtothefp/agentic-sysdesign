@@ -1,15 +1,16 @@
 # Deploy infra (Module 3)
 
 Railway project **sysdesign** (`12dffbd4-65bd-44f7-83b7-d30238c92892`), one `production`
-environment, four services. Postgres is NOT here, it lives on Supabase
+environment. Postgres is NOT here, it lives on Supabase
 (project `bmrwhbubywwaxyyynvgx`, reached via the us-east-1 session pooler).
 
 | Service | Source | Runs |
 |---|---|---|
 | `api` | GitHub `dtothefp/to-the-moon`, root = repo root | uvicorn via `services/api/railway.json`, public domain |
 | `worker` | same repo + root | Celery worker with beat embedded, via `services/worker/railway.json`, private |
-| `chat` | same repo + root | Module 7 chat agent via `services/agent/railway.json`, public domain |
-| `redis` | image `redis:7-alpine` + volume | broker, result backend, SSE pub/sub, private |
+| `chat` | same repo + root | Module 7 chat AGENT (the ReAct loop) via `services/agent/railway.json`, public domain |
+| `messaging` | same repo + root | messaging drill: FastAPI + WebSocket direct-messaging gateway via `services/chat/railway.json`, public domain. NOT the same as `chat` above (that is the agent); this is the socket server that delivers messages |
+| `redis` | image `redis:7-alpine` + volume | broker, result backend, SSE pub/sub, and (step 2) chat fan-out, private |
 
 ## Where each piece of config lives (the IaC-lite contract)
 
@@ -126,6 +127,34 @@ in `railway-env.py`. It cannot touch other projects.
 
 Connecting a service to GitHub is the one thing the token cannot do (it's a user-identity
 + GitHub-app grant), so that step happens once in the dashboard.
+
+### Provisioning the messaging gateway (one-time, in progress)
+
+The codified surface is done and merged: `services/chat/railway.json` (build/run + a
+production `preDeployCommand` that applies the `msg_*` migration), the `messaging` entry in
+[railway-env.py](railway-env.py)'s `SERVICES` + `MANIFEST`, and the lazy id injection in
+`main`. What's left needs the dashboard (GitHub connect) plus the project token, in order:
+
+1. **Create the service** in the `sysdesign` project's `production` environment, source =
+   GitHub `dtothefp/to-the-moon`, root = repo root (same as api/worker). Name it
+   `messaging`.
+2. **Point it at the config file.** Service settings, set the Railway config path to
+   `services/chat/railway.json` (Railway reads build + start + healthcheck +
+   `preDeployCommand` from there, exactly like api).
+3. **Generate a public domain** if you want to reach `/ws` from outside (WebSocket upgrade
+   works over the normal HTTPS domain; the `--proxy-headers --forwarded-allow-ips='*'` in
+   the start command is already there for the proxy). Keep it private if only in-cluster.
+4. **Record the id.** Copy the new service id into the repo-root `.env` as
+   `RAILWAY_MESSAGING_SERVICE_ID=...` so the sync script stops skipping it.
+5. **Push env vars.** `python3 infra/railway-env.py sync --dry` to preview
+   (`DATABASE_URL` from `DATABASE_URL_SUPABASE`, `REDIS_URL` from the shared reference
+   template), then drop `--dry` to push.
+6. **Deploy.** It auto-deploys on the next push to `main`, or trigger one manually. The
+   `preDeployCommand` runs `migrate.py` first, so the `msg_*` tables are created before the
+   gateway starts. Healthcheck is `GET /health`.
+
+Until step 1 happens, `railway-env.py` lists/syncs the four existing services and prints
+`messaging: skipped (no service id ...)`, so the script stays valid and runnable now.
 
 ## PR preview environments (opt-in, label-gated)
 

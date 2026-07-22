@@ -36,6 +36,13 @@ SERVICES = {
     # Empty until then, and the list/sync loops skip an id-less service, so this file is valid and
     # runnable before the service exists.
     "agent": "",
+    # The messaging gateway (services/chat: FastAPI + WebSocket direct messaging). A DIFFERENT
+    # service from "agent": that one is the ReAct chat agent (services/agent), this one is the
+    # message-delivery socket server. Named "messaging" precisely so the two don't get confused,
+    # since the repo dir services/chat and the agent's public "chat" domain both want that word.
+    # Same lazy-provision pattern: create the Railway service pointed at services/chat/railway.json,
+    # drop its id in the repo-root .env as RAILWAY_MESSAGING_SERVICE_ID, and it's injected at runtime.
+    "messaging": "",
 }
 
 # One Redis URL template, three consumers. ${{...}} is Railway's reference syntax,
@@ -144,6 +151,22 @@ MANIFEST = {
         "LANGSMITH_ENDPOINT": ("literal", "https://api.smith.langchain.com"),
         "LANGSMITH_PROJECT": ("literal", "sysdesign-prod"),
         "LANGSMITH_API_KEY": ("env_optional", "LANGSMITH_API_KEY_PROD"),
+    },
+    "messaging": {
+        # Small blast radius on purpose: the gateway persists to Postgres and (step 2) fans out
+        # over Redis pub/sub, nothing else. No Apify, no LLM keys, no API client key (auth is
+        # punted; identity is a user_id query param until Supabase JWT lands).
+        #
+        # Same Supabase Postgres as api + worker. The msg_* tables coexist with the scraper schema,
+        # and the service's own railway.json preDeployCommand runs migrate.py so the schema is
+        # applied on deploy.
+        "DATABASE_URL": ("env", "DATABASE_URL_SUPABASE"),
+        # For step 2: publish each message to a Redis channel, every instance subscribes, and the
+        # instance holding the recipient's socket does the local push. Same shared redis + rotating
+        # ${{...}} password reference as api/worker, so multi-instance chat and the Celery broker
+        # ride one Redis. Unused by step 1 (single instance) but set now so the step-2 deploy is
+        # just code, no env change.
+        "REDIS_URL": ("literal", REDIS_BASE),
     },
     # redis's own REDIS_PASSWORD is deliberately NOT managed here. It was generated
     # once at provision time; rotating it is a deliberate act, not a sync side effect.
@@ -285,6 +308,8 @@ def main() -> None:
     # Lazily-provisioned services read their id from .env, so this file stays valid pre-provision.
     if env.get("RAILWAY_AGENT_SERVICE_ID"):
         SERVICES["agent"] = env["RAILWAY_AGENT_SERVICE_ID"]
+    if env.get("RAILWAY_MESSAGING_SERVICE_ID"):
+        SERVICES["messaging"] = env["RAILWAY_MESSAGING_SERVICE_ID"]
     if args[0] == "list":
         cmd_list(token)
     else:
